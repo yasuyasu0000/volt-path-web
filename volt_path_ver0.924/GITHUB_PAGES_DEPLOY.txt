@@ -1,0 +1,45 @@
+VOLT PATH ver0.924 - GitHub Pages 公開手順
+==========================================
+
+このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
+Godot 4.7.2 で Web Export し、そのまま GitHub Pages へ公開する構成です。
+Windows側でWeb Exportする必要はありません。
+
+初回だけ行うこと
+----------------
+1. このフォルダの中身を GitHub リポジトリのルートへ置く。
+2. GitHub の Settings > Pages を開く。
+3. Build and deployment の Source を「GitHub Actions」にする。
+4. main ブランチへ push する。
+5. Actions の「Deploy VOLT PATH to GitHub Pages」が成功すれば公開完了。
+
+以後の更新
+----------
+ゲームを更新して main へ push するだけです。
+.github/workflows/deploy-pages.yml が Web Export と Pages 更新を自動実行します。
+
+GA4（任意）
+-----------
+初期状態では解析送信は完全にOFFです。
+有効にする場合は project.godot の以下を変更します。
+
+[analytics]
+ga4_measurement_id="G-XXXXXXXXXX"
+
+Web版でのみGoogle Analyticsを読み込みます。デスクトップ実行時には送信しません。
+送信イベント:
+- game_start
+- floor_clear
+- game_over
+- game_clear
+
+各イベントには game_version / floor / run_time_seconds / turn / steps / damage_taken を付与します。
+個人を識別する情報はゲーム側から送信しません。
+
+Web Export設定
+--------------
+- Compatibility renderer
+- Threads OFF
+- GDExtension OFF
+- index.html で出力
+GitHub Pages側にCOOP/COEPヘッダーを要求しない構成です。
