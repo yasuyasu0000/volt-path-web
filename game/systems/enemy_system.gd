@@ -268,7 +268,7 @@ func _tank_fire(host, top_left: Vector2i, d: Vector2i) -> void:
         if not host.last_attack_cells.has(p):
             host.last_attack_cells.append(p)
     if host.player_pos in beam:
-        host._apply_player_damage(1, "tank")
+        host._apply_player_damage(1, "ranged", "tank")
 
 
 func _tank_take_turn(host, index: int, top_left: Vector2i, occupied: Dictionary) -> void:
@@ -335,7 +335,7 @@ func _cross_fire(host, center: Vector2i) -> void:
         if host.player_pos in ray:
             hit_player = true
     if hit_player:
-        host._apply_player_damage(1, "cross_discharge")
+        host._apply_player_damage(1, "area", "cross_discharge")
 
 
 func _cross_discharge_take_turn(host, index: int, center: Vector2i, occupied: Dictionary) -> void:
@@ -406,7 +406,7 @@ func _artillery_fire(host, left_cell: Vector2i) -> void:
             host.last_attack_cells.append(p)
 
     if host.player_pos in left_ray or host.player_pos in right_ray:
-        host._apply_player_damage(1, "artillery")
+        host._apply_player_damage(1, "ranged", "artillery")
 
 
 func _runner_take_turn(host, index: int, runner_pos: Vector2i, occupied: Dictionary) -> void:
@@ -482,7 +482,7 @@ func _charger_take_turn(host, index: int, charger_pos: Vector2i, occupied: Dicti
             if not host.last_attack_cells.has(next):
                 host.last_attack_cells.append(next)
             if next == host.player_pos:
-                host._apply_player_damage(1, "charger")
+                host._apply_player_damage(1, "charge", "charger")
                 # プレイヤーと同じマスには入れないため、現在位置で突進終了。
                 break
             cur = next
@@ -556,17 +556,17 @@ func _turret_fire(host, turret_pos: Vector2i, d: Vector2i) -> void:
             host.last_attack_cells.append(p)
 
     if host.player_pos in ray:
-        host._apply_player_damage(1, "turret")
+        host._apply_player_damage(1, "ranged", "turret")
 
 
-func _enemy_attack(host, _enemy_pos: Vector2i, target: Vector2i, cause: String = "enemy_attack") -> void:
+func _enemy_attack(host, _enemy_pos: Vector2i, target: Vector2i, enemy_type: String = "enemy") -> void:
     host._play_sfx(SFX_ENEMY_MELEE)
-    # 通常敵の攻撃は帯電状態を変更しない。攻撃マスは演出表示だけ残す。
+    # 通常敵の隣接攻撃はAnalytics上ではcontactに集約し、enemy_typeだけ内部保持する。
     if host._is_floor(target) and not host.last_attack_cells.has(target):
         host.last_attack_cells.append(target)
 
     if host.player_pos == target:
-        host._apply_player_damage(1, cause)
+        host._apply_player_damage(1, "contact", enemy_type)
 
 
 

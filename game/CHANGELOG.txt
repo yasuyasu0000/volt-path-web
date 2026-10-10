@@ -1,3 +1,21 @@
+ver0.949
+- GA4を難易度分析向けに整理。主要イベントを game_start / floor_start / damage_taken / floor_clear / game_over / floor_retry / game_clear の7種へ絞った。
+- damage_takenを追加し、floor / source / amount / hp_after を送信。敵由来では内部確認用enemy_typeも送信する。
+- source / game_over causeは contact / ranged / charge / area / boss_stomp / overcharge の6分類へ統一。
+- floor_clear / game_over / game_clearでは floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining を送信。
+- BAT獲得/消費、skill_use、reroll、full_charge_enter、floor_reset、boss専用イベントなど難易度分析に不要なGA4送信を停止。
+- skill_use用に行っていた敵HP/生存数の全件集計も撤去し、通常プレイの余計な集計コストを削減。
+
+ver0.948
+- ラインダッシュ経路選択中、現在地から直前の経路マスへ戻る方向入力で最後の1マスを取り消せるように変更。
+- 経路を1マス取り消すたびに黄色い経路枠も1マス分戻り、Xで全キャンセルせず途中から選び直せる。
+- 直前より前の選択済みマスへ直接入り直す操作は従来どおり不可。
+
+ver0.947
+- ラインダッシュの経路選択を1マス単位へ変更。方向キー1入力につき、現在の経路終端から隣接する帯電マスを1マスだけ追加する。
+- ラインダッシュ選択中、通過予定の全マスへ黄色い枠を表示し、現在の経路終端は少し太い黄色枠で表示する。
+- 自動経路延長と分岐地点だけの方向選択を廃止。Zで現在選択済みの経路を発動、Xでキャンセルする基本操作は維持。
+
 ver0.946
 - スキル使用後の補充抽選を変更。使用したスキル自身と、使用直前に手札へあった他2スキルを候補から除外し、残り3種から1枚を補充する。
 - ワープのBAT消費を3から2へ変更。

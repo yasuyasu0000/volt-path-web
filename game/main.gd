@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.946
+# VOLT PATH ver0.949
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -197,17 +197,14 @@ var run_elapsed_seconds: float = 0.0
 var step_count := 0
 var damage_taken := 0
 
-# Public-test analytics: keep per-floor deltas locally and emit only summary events.
-# This avoids sending noisy per-tile/per-turn telemetry while still exposing difficulty,
-# resource pressure, skill usage and retry behavior.
+# Public-test analytics: difficulty-focused telemetry only.
+# Keep floor progression, damage pressure and retry behavior; avoid resource/skill noise.
 var floor_start_run_time_seconds := 0.0
 var floor_start_turn := 0
-var floor_start_steps := 0
 var floor_start_damage_taken := 0
-var floor_bat_start := 0
-var floor_bat_gained := 0
-var floor_bat_spent := 0
-var last_player_damage_cause := ""
+var floor_hits_taken := 0
+var last_player_damage_source := ""
+var last_player_damage_enemy_type := ""
 
 var damage_fx_time_left := 0.0
 var damage_fx_intensity := 0.0
@@ -324,12 +321,10 @@ func reset_run() -> void:
     damage_taken = 0
     floor_start_run_time_seconds = 0.0
     floor_start_turn = 0
-    floor_start_steps = 0
     floor_start_damage_taken = 0
-    floor_bat_start = 0
-    floor_bat_gained = 0
-    floor_bat_spent = 0
-    last_player_damage_cause = ""
+    floor_hits_taken = 0
+    last_player_damage_source = ""
+    last_player_damage_enemy_type = ""
     if spider_boss != null:
         spider_boss.reset()
     damage_fx_time_left = 0.0
@@ -567,12 +562,11 @@ func _start_next_stage() -> void:
         message = "四本の脚をすべて破壊してください。脚の踏みつけを避けて攻撃してください。"
     else:
         message = ""
-    last_player_damage_cause = ""
+    last_player_damage_source = ""
+    last_player_damage_enemy_type = ""
     _reset_floor_analytics_baseline()
     _capture_stage_restart_snapshot()
     _track_floor_start_event()
-    if current_floor == TOTAL_FLOORS:
-        _track_run_event("boss_start", {"boss_legs": 4})
     _schedule_auto_pass_if_needed()
     queue_redraw()
 
@@ -595,11 +589,8 @@ func _capture_stage_restart_snapshot() -> void:
         "damage_taken": damage_taken,
         "floor_start_run_time_seconds": floor_start_run_time_seconds,
         "floor_start_turn": floor_start_turn,
-        "floor_start_steps": floor_start_steps,
         "floor_start_damage_taken": floor_start_damage_taken,
-        "floor_bat_start": floor_bat_start,
-        "floor_bat_gained": floor_bat_gained,
-        "floor_bat_spent": floor_bat_spent,
+        "floor_hits_taken": floor_hits_taken,
         "message": message,
         "rng_state": rng.state,
     }
@@ -644,9 +635,7 @@ func _restart_current_stage_from_snapshot(reason: String = "reset") -> void:
         return
 
     if reason == "retry":
-        _track_floor_event("floor_retry")
-    else:
-        _track_floor_event("floor_reset")
+        _track_run_event("floor_retry")
 
     current_floor = int(stage_restart_snapshot.get("floor", current_floor))
 
@@ -676,12 +665,10 @@ func _restart_current_stage_from_snapshot(reason: String = "reset") -> void:
     damage_taken = int(stage_restart_snapshot.get("damage_taken", damage_taken))
     floor_start_run_time_seconds = float(stage_restart_snapshot.get("floor_start_run_time_seconds", run_elapsed_seconds))
     floor_start_turn = int(stage_restart_snapshot.get("floor_start_turn", turn))
-    floor_start_steps = int(stage_restart_snapshot.get("floor_start_steps", step_count))
     floor_start_damage_taken = int(stage_restart_snapshot.get("floor_start_damage_taken", damage_taken))
-    floor_bat_start = int(stage_restart_snapshot.get("floor_bat_start", bat))
-    floor_bat_gained = int(stage_restart_snapshot.get("floor_bat_gained", 0))
-    floor_bat_spent = int(stage_restart_snapshot.get("floor_bat_spent", 0))
-    last_player_damage_cause = ""
+    floor_hits_taken = int(stage_restart_snapshot.get("floor_hits_taken", 0))
+    last_player_damage_source = ""
+    last_player_damage_enemy_type = ""
     message = str(stage_restart_snapshot.get("message", ""))
     rng.state = int(stage_restart_snapshot.get("rng_state", rng.state))
 
@@ -966,7 +953,7 @@ func _boss_stomp(index: int) -> void:
         return
     _play_sfx(SFX_BOSS_STOMP)
     if bool(result.get("hit_player", false)):
-        _apply_player_damage(1, "boss_stomp")
+        _apply_player_damage(1, "boss_stomp", "boss_leg")
         if hp > 0:
             var stomp_cells: Array[Vector2i] = []
             for item in result.get("cells", []):
@@ -1532,7 +1519,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.946", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.949", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -1661,13 +1648,8 @@ func _reroll_hand() -> void:
         _play_sfx(SFX_UI_BAT_DENIED)
         message = "リロールにはBATが%d必要です。" % REROLL_COST
         return
-    var bat_before := bat
     _spend_bat(REROLL_COST)
     _play_sfx(SFX_UI_REROLL)
-    _track_run_event("reroll", {
-        "bat_before": bat_before,
-        "bat_cost": REROLL_COST,
-    })
 
     # 旧手札を残したまま新手札を先に抽選し、短い切替演出の後で確定する。
     reroll_old_hand.clear()
@@ -1822,9 +1804,6 @@ func _confirm_arc() -> void:
         active_hand_slot = -1
         message = "BATが足りません。"
         return
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_ARC)
     last_attack_cells.clear()
@@ -1840,7 +1819,6 @@ func _confirm_arc() -> void:
     if hit:
         _play_sfx(SFX_ENEMY_HIT)
     _remove_dead_enemies()
-    _track_skill_use(CARD_ARC, bat_before, cost, enemy_hp_before, live_before)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
@@ -1868,9 +1846,6 @@ func _confirm_surge() -> void:
         active_hand_slot = -1
         message = "一斉放電にはBATが%d必要です。" % cost
         return
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_SURGE)
     last_attack_cells.clear()
@@ -1892,7 +1867,6 @@ func _confirm_surge() -> void:
     if hit_count > 0:
         _play_sfx(SFX_ENEMY_HIT)
     _remove_dead_enemies()
-    _track_skill_use(CARD_SURGE, bat_before, cost, enemy_hp_before, live_before)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
@@ -1930,9 +1904,6 @@ func _confirm_bomb() -> void:
         active_hand_slot = -1
         message = "BATが足りません。"
         return
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_BOMB)
     last_attack_cells.clear()
@@ -1962,7 +1933,6 @@ func _confirm_bomb() -> void:
     if hit_count > 0:
         _play_sfx(SFX_ENEMY_HIT)
     _remove_dead_enemies()
-    _track_skill_use(CARD_BOMB, bat_before, cost, enemy_hp_before, live_before)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
@@ -1991,15 +1961,11 @@ func _confirm_warp() -> void:
         message = "BATが足りません。"
         return
 
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_WARP)
     var warp_origin: Vector2i = player_pos
     var warp_target: Vector2i = warp_cursor
     player_pos = warp_target
-    _track_skill_use(CARD_WARP, bat_before, cost, enemy_hp_before, live_before)
     var overload_damage: int = _apply_full_charge_movement_damage()
     _consume_active_card()
     aim_mode = ""
@@ -2009,96 +1975,53 @@ func _confirm_warp() -> void:
 func _begin_dash() -> void:
     aim_mode = CARD_DASH
     aim_dir = Vector2i.RIGHT
-    dash_route_customized = false
-    _rebuild_dash_preview()
-    message = "方向キーで最初の帯電マスを選択。帯電路は角を自動で曲がり、分岐では方向キーで先を選べます。"
-
-func _charged_dash_candidates(prev: Vector2i, cur: Vector2i, visited: Dictionary) -> Array[Vector2i]:
-    var out: Array[Vector2i] = []
-    var dirs: Array[Vector2i] = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
-    for d in dirs:
-        var n: Vector2i = cur + d
-        if n == prev:
-            continue
-        if visited.has(n):
-            continue
-        if _is_floor(n) and charged.has(n):
-            out.append(n)
-    return out
-
-func _extend_dash_preview(prev: Vector2i, cur: Vector2i, visited: Dictionary) -> void:
-    dash_branch_options.clear()
-    while true:
-        var candidates: Array[Vector2i] = _charged_dash_candidates(prev, cur, visited)
-        if candidates.is_empty():
-            return
-        if candidates.size() > 1:
-            dash_branch_origin = cur
-            for n in candidates:
-                dash_branch_options.append(n - cur)
-            message = "ラインダッシュ：分岐地点です。Zでここまで発動 / 方向キーで先へ進めます。"
-            return
-
-        var next: Vector2i = candidates[0]
-        dash_path_preview.append(next)
-        visited[next] = true
-        prev = cur
-        cur = next
-
-func _rebuild_dash_preview() -> void:
     dash_path_preview.clear()
     dash_branch_options.clear()
     dash_branch_origin = player_pos
-
-    var first: Vector2i = player_pos + aim_dir
-    if not _is_floor(first) or not charged.has(first):
-        return
-
-    var visited: Dictionary = {}
-    visited[player_pos] = true
-    visited[first] = true
-    dash_path_preview.append(first)
-    _extend_dash_preview(player_pos, first, visited)
+    dash_route_customized = false
+    message = "ラインダッシュ：方向キーで1マスずつ選択。直前のマスへ戻ると1マス取消。Zで発動 / Xでキャンセル。"
 
 func _handle_dash_direction_input(d: Vector2i) -> void:
-    if not dash_branch_options.is_empty():
-        if not dash_branch_options.has(d):
-            message = "その方向には帯電路が続いていません。分岐候補を選んでください。"
+    # ver0.948: 方向キー1入力につき経路を1マス追加する。
+    # 現在の終端から直前のマスへ戻る入力だけは「1手戻す」として最後の1マスを取り消す。
+    var cur: Vector2i = player_pos
+    if not dash_path_preview.is_empty():
+        cur = dash_path_preview[dash_path_preview.size() - 1]
+
+    var next: Vector2i = cur + d
+
+    # 直前の経路マス（最初の1マスなら開始地点）へ戻った場合は、最後の1マスだけ取り消す。
+    if not dash_path_preview.is_empty():
+        var previous: Vector2i = player_pos
+        if dash_path_preview.size() >= 2:
+            previous = dash_path_preview[dash_path_preview.size() - 2]
+        if next == previous:
+            dash_path_preview.pop_back()
+            dash_branch_origin = player_pos if dash_path_preview.is_empty() else dash_path_preview[dash_path_preview.size() - 1]
+            dash_branch_options.clear()
+            dash_route_customized = not dash_path_preview.is_empty()
+            if dash_path_preview.is_empty():
+                message = "ラインダッシュ：経路を開始地点まで戻しました。方向キーで1マス選択。"
+            else:
+                message = "ラインダッシュ：1マス戻しました。経路 %dマス。" % dash_path_preview.size()
             return
 
-        dash_route_customized = true
-        var prev: Vector2i = player_pos
-        if dash_path_preview.size() >= 2:
-            prev = dash_path_preview[dash_path_preview.size() - 2]
-        var cur: Vector2i = dash_branch_origin
-        var next: Vector2i = cur + d
-
-        var visited: Dictionary = {}
-        visited[player_pos] = true
-        for p in dash_path_preview:
-            visited[p] = true
-        if not visited.has(next):
-            dash_path_preview.append(next)
-            visited[next] = true
-        _extend_dash_preview(cur, next, visited)
-        if dash_branch_options.is_empty():
-            message = "ラインダッシュ：経路終端です。Zで発動できます。"
-        return
-
-    if dash_route_customized:
-        message = "ラインダッシュ：経路は確定済みです。"
-        return
-
-    aim_dir = d
-    _rebuild_dash_preview()
-    if dash_path_preview.is_empty():
+    if not _is_floor(next) or not charged.has(next):
         message = "その方向には帯電路がありません。"
-    elif dash_branch_options.is_empty():
-        message = "ラインダッシュ：経路 %dマス。" % dash_path_preview.size()
+        return
+    if next == player_pos or dash_path_preview.has(next):
+        message = "直前以外の選択済みマスには戻れません。"
+        return
+
+    dash_path_preview.append(next)
+    dash_branch_origin = next
+    dash_branch_options.clear()
+    dash_route_customized = true
+    aim_dir = d
+    message = "ラインダッシュ：経路 %dマス。方向キーで1マス追加 / 直前へ戻って取消 / Zで発動。" % dash_path_preview.size()
 
 func _confirm_dash() -> void:
-    # 分岐が残っていても、現在のプレビュー終端（分岐地点）までで発動できる。
-    # 方向キーを押した場合だけ、その分岐を選んでさらに先へ経路を伸ばす。
+    # 方向キーで1マスずつ積み上げた現在のプレビュー経路を、そのまま発動する。
     var path: Array[Vector2i] = []
     for p in dash_path_preview:
         path.append(p)
@@ -2114,9 +2037,6 @@ func _confirm_dash() -> void:
         message = "BATが足りません。"
         return
 
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_DASH)
     last_attack_cells.clear()
@@ -2138,7 +2058,6 @@ func _confirm_dash() -> void:
     if hit_count > 0:
         _play_sfx(SFX_ENEMY_HIT)
     _remove_dead_enemies()
-    _track_skill_use(CARD_DASH, bat_before, cost, enemy_hp_before, live_before)
 
     # 生き残った敵とは同じマスに止まれないので、経路の末尾から空きマスを探す。
     var destination: Vector2i = player_pos
@@ -2232,9 +2151,6 @@ func _confirm_loop() -> void:
         message = "帯電した道で閉じたループがありません。"
         return
 
-    var bat_before := bat
-    var enemy_hp_before := _analytics_total_enemy_hp()
-    var live_before := _analytics_live_enemy_count()
     _spend_bat(cost)
     _play_sfx(SFX_CARD_LOOP)
     last_attack_cells.clear()
@@ -2268,7 +2184,6 @@ func _confirm_loop() -> void:
     if hit_count > 0:
         _play_sfx(SFX_ENEMY_HIT)
     _remove_dead_enemies()
-    _track_skill_use(CARD_LOOP, bat_before, cost, enemy_hp_before, live_before)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
@@ -2536,22 +2451,15 @@ func _schedule_auto_pass_if_needed() -> void:
 func _analytics_run_payload() -> Dictionary:
     return {
         "floor": current_floor,
-        "run_time_seconds": snappedf(run_elapsed_seconds, 0.001),
-        "turn": turn,
-        "steps": step_count,
-        "damage_taken": damage_taken,
     }
 
 func _analytics_floor_metrics() -> Dictionary:
     return {
         "floor_time_seconds": snappedf(maxf(0.0, run_elapsed_seconds - floor_start_run_time_seconds), 0.001),
         "floor_turns": maxi(0, turn - floor_start_turn),
-        "floor_steps": maxi(0, step_count - floor_start_steps),
         "floor_damage_taken": maxi(0, damage_taken - floor_start_damage_taken),
-        "bat_start": floor_bat_start,
-        "bat_end": bat,
-        "bat_gained": floor_bat_gained,
-        "bat_spent": floor_bat_spent,
+        "hits_taken": maxi(0, floor_hits_taken),
+        "hp_remaining": hp,
     }
 
 func _merge_analytics_payload(base: Dictionary, extra: Dictionary) -> Dictionary:
@@ -2573,67 +2481,44 @@ func _track_floor_event(event_name: String, extra: Dictionary = {}) -> void:
 func _reset_floor_analytics_baseline() -> void:
     floor_start_run_time_seconds = run_elapsed_seconds
     floor_start_turn = turn
-    floor_start_steps = step_count
     floor_start_damage_taken = damage_taken
-    floor_bat_start = bat
-    floor_bat_gained = 0
-    floor_bat_spent = 0
+    floor_hits_taken = 0
 
 func _track_floor_start_event() -> void:
-    _track_run_event("floor_start", {
-        "bat_start": bat,
-        "hp_start": hp,
-        "enemy_count": _analytics_live_enemy_count(),
-    })
+    _track_run_event("floor_start")
 
 func _gain_bat(amount: int) -> int:
     if amount <= 0:
         return 0
     var before := bat
     bat = min(MAX_BAT, bat + amount)
-    var actual := maxi(0, bat - before)
-    floor_bat_gained += actual
-    return actual
+    return maxi(0, bat - before)
 
 func _spend_bat(amount: int) -> int:
     if amount <= 0:
         return 0
     var before := bat
     bat = max(0, bat - amount)
-    var actual := maxi(0, before - bat)
-    floor_bat_spent += actual
-    return actual
+    return maxi(0, before - bat)
 
-func _analytics_total_enemy_hp() -> int:
-    var total := 0
-    for enemy in enemies:
-        total += maxi(0, int(enemy.get("hp", 0)))
-    return total
-
-func _analytics_live_enemy_count() -> int:
-    var count := 0
-    for enemy in enemies:
-        if int(enemy.get("hp", 0)) <= 0:
-            continue
-        if str(enemy.get("type", "")) == "boss_leg" and bool(enemy.get("destroyed", false)):
-            continue
-        count += 1
-    return count
-
-func _track_skill_use(skill_id: String, bat_before: int, bat_cost: int, enemy_hp_before: int, live_before: int) -> void:
-    _track_run_event("skill_use", {
-        "skill": skill_id,
-        "bat_before": bat_before,
-        "bat_cost": bat_cost,
-        "damage": maxi(0, enemy_hp_before - _analytics_total_enemy_hp()),
-        "kills": maxi(0, live_before - _analytics_live_enemy_count()),
-    })
+func _track_damage_taken_event(amount: int, source: String, enemy_type: String) -> void:
+    var payload := {
+        "source": source,
+        "amount": amount,
+        "hp_after": hp,
+    }
+    if enemy_type != "":
+        payload["enemy_type"] = enemy_type
+    _track_run_event("damage_taken", payload)
 
 func _track_game_over_event() -> void:
     var cause := game_over_reason
     if cause == "":
-        cause = "hp"
-    _track_floor_event("game_over", {"cause": cause})
+        cause = "contact"
+    var extra := {"cause": cause}
+    if last_player_damage_enemy_type != "":
+        extra["enemy_type"] = last_player_damage_enemy_type
+    _track_floor_event("game_over", extra)
 
 func _finish_player_turn() -> void:
     turn += 1
@@ -2646,7 +2531,7 @@ func _finish_player_turn() -> void:
     if hp <= 0:
         hp = 0
         game_over = true
-        game_over_reason = last_player_damage_cause if last_player_damage_cause != "" else "hp"
+        game_over_reason = last_player_damage_source if last_player_damage_source != "" else "contact"
         auto_pass_pending = false
         auto_pass_timer = 0.0
         aim_mode = ""
@@ -2692,7 +2577,7 @@ func _finish_player_turn() -> void:
     if hp <= 0:
         hp = 0
         game_over = true
-        game_over_reason = last_player_damage_cause if last_player_damage_cause != "" else "hp"
+        game_over_reason = last_player_damage_source if last_player_damage_source != "" else "contact"
         auto_pass_pending = false
         auto_pass_timer = 0.0
         _play_sfx(SFX_GAME_OVER_HP)
@@ -2775,15 +2660,17 @@ func _turret_axis_dir(start: Vector2i, target: Vector2i) -> Vector2i:
 func _turret_ray_cells(start: Vector2i, d: Vector2i) -> Array[Vector2i]:
     return enemy_geometry.turret_ray_cells(start, d)
 
-func _apply_player_damage(amount: int, cause: String = "enemy_attack") -> void:
+func _apply_player_damage(amount: int, source: String = "contact", enemy_type: String = "") -> void:
     if amount <= 0 or hp <= 0:
         return
     var actual_damage: int = min(amount, hp)
     hp = max(0, hp - amount)
     damage_taken += actual_damage
     if actual_damage > 0:
-        last_player_damage_cause = cause
-    if actual_damage > 0:
+        floor_hits_taken += 1
+        last_player_damage_source = source
+        last_player_damage_enemy_type = enemy_type
+        _track_damage_taken_event(actual_damage, source, enemy_type)
         _play_sfx(SFX_PLAYER_HURT)
         _start_damage_feedback(actual_damage)
         message = "HP -%d" % actual_damage
@@ -3071,14 +2958,8 @@ func _remove_dead_enemies() -> void:
         if int(enemies[i]["hp"]) > 0:
             continue
         if str(enemies[i].get("type", "")) == "boss_leg":
-            var leg_id := int(enemies[i].get("leg_id", -1))
             if spider_boss != null and bool(spider_boss.mark_leg_destroyed(enemies, i, Callable(self, "_cell_center"))):
                 boss_removed_count += 1
-                _track_run_event("boss_leg_destroyed", {
-                    "leg_id": leg_id,
-                    "legs_remaining": int(spider_boss.alive_leg_count(enemies)),
-                    "boss_turn": int(spider_boss.boss_turn_count),
-                })
             continue
         enemies.remove_at(i)
         removed_count += 1
@@ -3135,10 +3016,6 @@ func _refresh_full_charge_hazard_state() -> void:
     full_charge_hazard_active = should_be_active
     if full_charge_hazard_active:
         message = "全面帯電：移動するたびHP -%d" % FULL_CHARGE_MOVE_DAMAGE
-        _track_run_event("full_charge_enter", {
-            "hp": hp,
-            "bat": bat,
-        })
     queue_redraw()
 
 func _apply_full_charge_movement_damage() -> int:

@@ -217,11 +217,7 @@ func _context_action_guide_text() -> String:
         CARD_BOMB, CARD_WARP:
             return "↑↓←→ 照準    Z 決定    X キャンセル"
         CARD_DASH:
-            if h.dash_branch_options.size() > 1:
-                return "↑↓←→ 分岐選択    Z ここで発動    X キャンセル"
-            if not h.dash_route_customized:
-                return "↑↓←→ 開始方向    Z 発動    X キャンセル"
-            return "Z 発動    X キャンセル"
+            return "↑↓←→ 追加/1手戻す    Z 発動    X キャンセル"
         CARD_SURGE:
             return "Z 発動    X キャンセル"
         CARD_LOOP:

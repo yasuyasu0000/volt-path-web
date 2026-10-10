@@ -1,4 +1,4 @@
-VOLT PATH ver0.946 - GitHub Pages 公開手順
+VOLT PATH ver0.949 - GitHub Pages 公開手順
 ==========================================
 
 このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
@@ -24,21 +24,20 @@ Web Export preset の html/head_include でGoogle公式のgtag.jsを読み込み
 Measurement ID: G-EFN2NDBE53
 
 ページ読み込み時にGA4を初期化し、Godot側のJavaScriptBridgeは以下の
-ゲームイベント送信だけを担当します。
+難易度分析イベントだけを担当します。
 - game_start
 - floor_start
+- damage_taken
 - floor_clear
-- skill_use
-- reroll
-- full_charge_enter
 - game_over
 - floor_retry
-- floor_reset
-- boss_start
-- boss_leg_destroyed
 - game_clear
 
-各イベントには game_version / floor / run_time_seconds / turn / steps / damage_taken を付与します。
+game_versionは全イベントへ自動付与し、floorもゲーム側から送信します。
+damage_taken: source / amount / hp_after。敵由来では内部確認用enemy_typeも追加。
+sourceとgame_overのcauseは contact / ranged / charge / area / boss_stomp / overcharge の6分類です。
+floor_clear / game_over / game_clear: floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining。
+BAT獲得/消費、skill_use、reroll、floor_reset、boss専用イベント等は送信しません。
 デスクトップ版では送信しません。個人を識別する情報はゲーム側から送信しません。
 
 確認方法:

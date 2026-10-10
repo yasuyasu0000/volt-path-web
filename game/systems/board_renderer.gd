@@ -120,16 +120,13 @@ func draw_aim_overlay() -> void:
             h.draw_rect(h._cell_rect(boundary_cell).grow(-2.0), h.C_ARC)
             h.draw_rect(h._cell_rect(boundary_cell).grow(-1.0), Color("#ffe95c"), false, 2.0)
     elif h.aim_mode == h.CARD_DASH:
-        if not h.dash_route_customized and h.dash_branch_options.is_empty():
-            _draw_direction_indicator(h.aim_dir)
-        for p in h.dash_path_preview:
+        # 選択済みの経路は、塗りだけでなく各マスへ黄色い枠を残す。
+        # 1マスずつ経路を伸ばすため、長いPATHでも通過予定セルを追いやすい。
+        for i in range(h.dash_path_preview.size()):
+            var p: Vector2i = h.dash_path_preview[i]
             h.draw_rect(h._cell_rect(p).grow(-3.0), h.C_ARC)
-        if not h.dash_branch_options.is_empty():
-            for d in h.dash_branch_options:
-                var branch_cell: Vector2i = h.dash_branch_origin + d
-                if h._in_bounds(branch_cell):
-                    h.draw_rect(h._cell_rect(branch_cell).grow(-1.0), Color("#ffe95c"), false, 3.0)
-            _draw_direction_indicator_from_cell(h.dash_branch_origin, h.dash_branch_options[0], Color("#ffe95c"), false)
+            var border_width: float = 3.0 if i == h.dash_path_preview.size() - 1 else 2.0
+            h.draw_rect(h._cell_rect(p).grow(-1.0), Color("#ffe95c"), false, border_width)
     elif h.aim_mode == h.CARD_BOMB:
         # 爆弾は接続や距離に関係なく、盤面上の任意の帯電マスを爆心にできる。
         for key in h.charged.keys():

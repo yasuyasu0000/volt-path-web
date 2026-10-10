@@ -1,4 +1,4 @@
-VOLT PATH ver0.946
+VOLT PATH ver0.949
 =================
 対象: Godot 4.7.x / Compatibility
 
@@ -38,8 +38,9 @@ VOLT PATH ver0.946
   盤面上の任意の帯電マスへ瞬間移動。帯電PATHがつながっている必要はない。
 
 ラインダッシュ / BAT 2
+  経路選択は方向キー1回で1マス追加。直前のマスへ戻る方向入力で最後の1マスを取り消して選び直せる。
   連続した帯電PATHを走り、敵の占有マスを通過するたび1ダメージ。
-  分岐では方向選択。Zで途中停止して発動可能。
+  方向キー1入力につき経路を1マスずつ追加し、選択済み経路は黄色い枠で表示。Zで現在の経路を発動。
 
 ループ内爆破 / BAT 4
   現在プレイヤーと接続している帯電PATHで閉じた輪を作る。
@@ -95,7 +96,7 @@ FLOOR 10: 四つ脚の蜘蛛ボス
 
 操作
 ----
-矢印キー : 移動 / 照準 / 分岐選択
+矢印キー : 移動 / 照準 / 経路選択
 1〜3      : 対応する手札を選択
 0         : BAT 2でリロール
 Z / Enter : 決定 / 発動
@@ -123,7 +124,9 @@ Web公開 / Analytics
 ・Web Export presetを追加。Threads OFFでGitHub Pages互換。
 ・mainブランチへのpushでGitHub ActionsがLinux上でWeb Exportし、GitHub Pagesへ自動デプロイ可能。
 ・GA4 Measurement IDを設定済み。Web版ではAnalytics送信がON。
-・Web版のみGA4へ送信。主要イベント: game_start / floor_start / floor_clear / skill_use / reroll / full_charge_enter / game_over / floor_retry / floor_reset / boss_start / boss_leg_destroyed / game_clear。
+・Web版のみGA4へ送信。難易度分析用イベント: game_start / floor_start / damage_taken / floor_clear / game_over / floor_retry / game_clear。
+・被ダメージsourceは contact / ranged / charge / area / boss_stomp / overcharge の6分類。敵由来では内部確認用enemy_typeも送信する。
+・FLOOR終了時は floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining を集計。BAT系やskill_use等は送信しない。
 ・詳細はGITHUB_PAGES_DEPLOY.txtを参照。
 
 ファイル構成

@@ -3,7 +3,7 @@ extends RefCounted
 # Web-only GA4 event bridge.
 # GA4 itself and window.voltPathTrack() are initialized in the Web export
 # preset via html/head_include.
-const GAME_VERSION := "0.946"
+const GAME_VERSION := "0.949"
 
 var enabled := false
 var measurement_id := ""
