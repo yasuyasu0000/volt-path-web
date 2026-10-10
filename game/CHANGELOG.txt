@@ -1,3 +1,9 @@
+ver0.940
+- 公開テスト用Google Analytics 4を有効化。Measurement ID G-EFN2NDBE53 をproject.godotへ設定。
+- Web版で game_start / floor_clear / game_over / game_clear をGA4へ送信。デスクトップ版では送信しない。
+- Analyticsイベントの game_version を0.940へ更新。各イベントには floor / run_time_seconds / turn / steps / damage_taken を付与。
+- ゲーム側から個人を識別する情報は送信しない。
+
 ver0.939
 - GAME OVER後の導線を整理し、Rのリスタート確認を廃止。Zで現在階層を即RETRY、XでTITLEへ戻る。
 - RETRYは既存の階層開始スナップショットを復元し、地形・敵配置・手札・BAT・HP・経過時間・ターン数・歩数・被ダメージを階層入場時点へ戻す。

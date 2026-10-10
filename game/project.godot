@@ -3,7 +3,7 @@
 config_version=5
 
 [application]
-config/name="VOLT PATH ver0.939"
+config/name="VOLT PATH ver0.940"
 run/main_scene="res://main.tscn"
 run/max_fps=60
 
@@ -21,7 +21,7 @@ environment/defaults/default_clear_color=Color(0.035, 0.045, 0.06, 1)
 
 [analytics]
 # 空欄ならGA4送信なし。例: G-XXXXXXXXXX
-ga4_measurement_id=""
+ga4_measurement_id="G-EFN2NDBE53"
 
 [internationalization]
 locale/include_text_server_data=true

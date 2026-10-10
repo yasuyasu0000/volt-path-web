@@ -1,4 +1,4 @@
-VOLT PATH ver0.936 - GitHub Pages 公開手順
+VOLT PATH ver0.940 - GitHub Pages 公開手順
 ==========================================
 
 このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
@@ -20,11 +20,11 @@ Windows側でWeb Exportする必要はありません。
 
 GA4（任意）
 -----------
-初期状態では解析送信は完全にOFFです。
-有効にする場合は project.godot の以下を変更します。
+現在の公開テストではGA4を有効化済みです。
+project.godot の設定:
 
 [analytics]
-ga4_measurement_id="G-XXXXXXXXXX"
+ga4_measurement_id="G-EFN2NDBE53"
 
 Web版でのみGoogle Analyticsを読み込みます。デスクトップ実行時には送信しません。
 送信イベント:

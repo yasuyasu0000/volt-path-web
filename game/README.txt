@@ -1,4 +1,4 @@
-VOLT PATH ver0.939
+VOLT PATH ver0.940
 =================
 対象: Godot 4.7.x / Compatibility
 
@@ -122,8 +122,8 @@ Web公開 / Analytics
 -------------------
 ・Web Export presetを追加。Threads OFFでGitHub Pages互換。
 ・mainブランチへのpushでGitHub ActionsがLinux上でWeb Exportし、GitHub Pagesへ自動デプロイ可能。
-・GA4 Measurement IDは初期状態では空欄で、Analytics送信はOFF。
-・有効化時はgame_start / floor_clear / game_over / game_clearをWeb版のみ送信。
+・GA4 Measurement IDを設定済み。Web版ではAnalytics送信がON。
+・game_start / floor_clear / game_over / game_clearをWeb版のみ送信。
 ・詳細はGITHUB_PAGES_DEPLOY.txtを参照。
 
 ファイル構成
