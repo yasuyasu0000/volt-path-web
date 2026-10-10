@@ -1,36 +1,24 @@
 extends RefCounted
 
-# Web-only GA4 bridge. Empty measurement ID = completely disabled.
-# Set [analytics] ga4_measurement_id in project.godot when analytics should go live.
-const GAME_VERSION := "0.940"
+# Web-only GA4 event bridge.
+# GA4 itself is initialized in the Web export preset via html/head_include.
+const GAME_VERSION := "0.941"
 
 var enabled := false
 var measurement_id := ""
 
 func setup() -> void:
-    measurement_id = String(ProjectSettings.get_setting("analytics/ga4_measurement_id", "")).strip_edges()
     if not OS.has_feature("web"):
         return
-    if measurement_id == "" or not measurement_id.begins_with("G-"):
+
+    # Head Include runs before the Godot engine starts. Read the ID and verify that
+    # the standard gtag bootstrap is available before enabling game events.
+    measurement_id = String(JavaScriptBridge.eval("window.__voltPathGa4Id || ''", true)).strip_edges()
+    var gtag_ready = JavaScriptBridge.eval("typeof window.gtag === 'function'", true)
+    if measurement_id == "" or not measurement_id.begins_with("G-") or gtag_ready != true:
+        push_warning("GA4 Head Include was not initialized; analytics events are disabled.")
         return
 
-    var id_json := JSON.stringify(measurement_id)
-    var bootstrap := """
-(function() {
-    const id = %s;
-    if (!id || window.__voltPathGa4Ready) return;
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
-    window.gtag('js', new Date());
-    window.gtag('config', id, { send_page_view: true });
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id);
-    document.head.appendChild(script);
-    window.__voltPathGa4Ready = true;
-})();
-""" % id_json
-    JavaScriptBridge.eval(bootstrap, true)
     enabled = true
 
 func track(event_name: String, params: Dictionary = {}) -> void:

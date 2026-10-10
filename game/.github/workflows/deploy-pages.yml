@@ -24,6 +24,9 @@ jobs:
       - name: Verify UI font coverage
         run: python3 tools/check_ui_font_coverage.py
 
+      - name: Verify GA4 Head Include
+        run: python3 tools/check_ga4_config.py
+
       - name: Export Web build with Godot 4.7.2
         id: export
         uses: firebelley/godot-export@v8.0.0
@@ -43,7 +46,8 @@ jobs:
           test -f "$WEB_DIR/index.js"
           test -f "$WEB_DIR/index.wasm"
           test -f "$WEB_DIR/index.pck"
-          echo "Web export verified: $WEB_DIR"
+          grep -F "googletagmanager.com/gtag/js?id=G-EFN2NDBE53" "$WEB_DIR/index.html"
+          echo "Web export and GA4 Head Include verified: $WEB_DIR"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

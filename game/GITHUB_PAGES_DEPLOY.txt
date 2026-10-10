@@ -1,4 +1,4 @@
-VOLT PATH ver0.940 - GitHub Pages 公開手順
+VOLT PATH ver0.941 - GitHub Pages 公開手順
 ==========================================
 
 このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
@@ -18,23 +18,25 @@ Windows側でWeb Exportする必要はありません。
 ゲームを更新して main へ push するだけです。
 .github/workflows/deploy-pages.yml が Web Export と Pages 更新を自動実行します。
 
-GA4（任意）
------------
-現在の公開テストではGA4を有効化済みです。
-project.godot の設定:
+GA4（公開テストで有効）
+-------------------------
+Web Export preset の html/head_include でGoogle公式のgtag.jsを読み込みます。
+Measurement ID: G-EFN2NDBE53
 
-[analytics]
-ga4_measurement_id="G-EFN2NDBE53"
-
-Web版でのみGoogle Analyticsを読み込みます。デスクトップ実行時には送信しません。
-送信イベント:
+ページ読み込み時にGA4を初期化し、Godot側のJavaScriptBridgeは以下の
+ゲームイベント送信だけを担当します。
 - game_start
 - floor_clear
 - game_over
 - game_clear
 
 各イベントには game_version / floor / run_time_seconds / turn / steps / damage_taken を付与します。
-個人を識別する情報はゲーム側から送信しません。
+デスクトップ版では送信しません。個人を識別する情報はゲーム側から送信しません。
+
+確認方法:
+Chrome DevTools > Network を開いてページを再読み込みし、
+  googletagmanager.com/gtag/js?id=G-EFN2NDBE53
+が読み込まれることを確認します。
 
 Web Export設定
 --------------

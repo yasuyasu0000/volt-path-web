@@ -1,3 +1,8 @@
+ver0.941
+- GA4初期化方式を変更。Web Export presetの html/head_include にGoogle公式のgtag.jsスニペットを埋め込み、ページ読み込み時にGA4を初期化する。
+- systems/web_analytics.gd から動的script生成を削除し、JavaScriptBridgeは game_start / floor_clear / game_over / game_clear のゲームイベント送信専用にした。
+- Measurement IDはG-EFN2NDBE53のまま。デスクトップ版ではAnalytics送信を行わない。
+
 ver0.940
 - 公開テスト用Google Analytics 4を有効化。Measurement ID G-EFN2NDBE53 をproject.godotへ設定。
 - Web版で game_start / floor_clear / game_over / game_clear をGA4へ送信。デスクトップ版では送信しない。
