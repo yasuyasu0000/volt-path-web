@@ -1,4 +1,4 @@
-VOLT PATH ver0.942
+VOLT PATH ver0.946
 =================
 対象: Godot 4.7.x / Compatibility
 
@@ -34,7 +34,7 @@ VOLT PATH ver0.942
   帯電PATHの接続やプレイヤーからの距離は問わない。
   敵は爆発に入った占有マス1つにつき2ダメージ。
 
-ワープ / BAT 3
+ワープ / BAT 2
   盤面上の任意の帯電マスへ瞬間移動。帯電PATHがつながっている必要はない。
 
 ラインダッシュ / BAT 2
@@ -123,7 +123,7 @@ Web公開 / Analytics
 ・Web Export presetを追加。Threads OFFでGitHub Pages互換。
 ・mainブランチへのpushでGitHub ActionsがLinux上でWeb Exportし、GitHub Pagesへ自動デプロイ可能。
 ・GA4 Measurement IDを設定済み。Web版ではAnalytics送信がON。
-・game_start / floor_clear / game_over / game_clearをWeb版のみ送信。
+・Web版のみGA4へ送信。主要イベント: game_start / floor_start / floor_clear / skill_use / reroll / full_charge_enter / game_over / floor_retry / floor_reset / boss_start / boss_leg_destroyed / game_clear。
 ・詳細はGITHUB_PAGES_DEPLOY.txtを参照。
 
 ファイル構成

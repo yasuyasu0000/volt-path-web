@@ -1,3 +1,19 @@
+ver0.946
+- スキル使用後の補充抽選を変更。使用したスキル自身と、使用直前に手札へあった他2スキルを候補から除外し、残り3種から1枚を補充する。
+- ワープのBAT消費を3から2へ変更。
+- ワープの移動仕様・対象条件・Analytics計測など、コスト以外の挙動は変更なし。
+
+ver0.944
+- FLOOR 10ボスの描画順を修正。破壊済み脚の死体を先に描き、生存中の脚・敵を必ず前面へ描画する。
+- 死体表示、帯電セル上の青い発光、当たり判定、HP、行動ロジックは変更なし。
+
+ver0.943
+- 公開テスト用GA4イベントを拡張。floor_start / skill_use / reroll / full_charge_enter / floor_retry / floor_reset / boss_start / boss_leg_destroyedを追加。
+- floor_clear / game_over / retry/resetにはFLOOR内の時間・ターン・歩数・被ダメージ・BAT獲得/消費を集計して送信。
+- skill_useはskill / bat_before / bat_cost / damage / killsを送信。
+- game_overへcauseを追加し、chaser/serpent/heavy/turret/charger/artillery/cross_discharge/tank/boss_stomp/overcharge等を区別。
+- タイル単位・毎ターンの大量イベントは送らず、分析に必要な低頻度イベントへ限定。
+
 ver0.942
 - GA4の基本タグは0.941で正常動作したが、Godot側のカスタムイベントが送信されない問題を修正。
 - Head Includeにwindow.voltPathTrack(eventName, paramsJson)を定義し、gtag("event", ...)をブラウザ側の明示的な関数として実行する方式へ変更。

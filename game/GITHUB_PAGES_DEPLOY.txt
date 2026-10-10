@@ -1,4 +1,4 @@
-VOLT PATH ver0.942 - GitHub Pages 公開手順
+VOLT PATH ver0.946 - GitHub Pages 公開手順
 ==========================================
 
 このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
@@ -26,8 +26,16 @@ Measurement ID: G-EFN2NDBE53
 ページ読み込み時にGA4を初期化し、Godot側のJavaScriptBridgeは以下の
 ゲームイベント送信だけを担当します。
 - game_start
+- floor_start
 - floor_clear
+- skill_use
+- reroll
+- full_charge_enter
 - game_over
+- floor_retry
+- floor_reset
+- boss_start
+- boss_leg_destroyed
 - game_clear
 
 各イベントには game_version / floor / run_time_seconds / turn / steps / damage_taken を付与します。

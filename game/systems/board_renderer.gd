@@ -157,7 +157,18 @@ func draw_aim_overlay() -> void:
 
 func draw_enemies() -> void:
     var base_offset: Vector2 = h._damage_feedback_shake_offset() + h._boss_shake_offset() + h._enemy_impact_shake_offset()
-    for e in h.enemies:
+
+    # 破壊済みボス脚は死体として床上に残るが、生存中の脚・敵より必ず背面へ描く。
+    # 敵配列の生成順や脚破壊順に描画レイヤーが左右されないよう、描画専用の順序を作る。
+    var draw_order: Array[Dictionary] = []
+    for enemy in h.enemies:
+        if str(enemy.get("type", "")) == "boss_leg" and bool(enemy.get("destroyed", false)):
+            draw_order.append(enemy)
+    for enemy in h.enemies:
+        if not (str(enemy.get("type", "")) == "boss_leg" and bool(enemy.get("destroyed", false))):
+            draw_order.append(enemy)
+
+    for e in draw_order:
         h.draw_set_transform(base_offset + h._enemy_hit_reaction_offset(e))
         var ep: Vector2i = e["pos"]
         var c: Vector2 = h._cell_center(ep)

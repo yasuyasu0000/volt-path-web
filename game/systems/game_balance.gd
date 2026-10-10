@@ -12,7 +12,7 @@ const FULL_CHARGE_ENEMY_DAMAGE := 1
 const ARC_COST := 1
 const SURGE_COST := 6
 const BOMB_COST := 7
-const WARP_COST := 3
+const WARP_COST := 2
 const DASH_COST := 2
 const LOOP_COST := 4
 

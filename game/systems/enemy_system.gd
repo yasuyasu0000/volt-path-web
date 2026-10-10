@@ -88,7 +88,7 @@ func take_turn(host) -> void:
         # プレイヤーが移動しても攻撃先は追尾しない。
         if bool(host.enemies[i]["telegraph_active"]):
             var telegraph_target: Vector2i = host.enemies[i]["telegraph_target"]
-            _enemy_attack(host, ep, telegraph_target)
+            _enemy_attack(host, ep, telegraph_target, enemy_type)
             host.enemies[i]["telegraph_active"] = false
             occupied[ep] = true
             if host.hp <= 0:
@@ -123,7 +123,7 @@ func _serpent_take_turn(host, index: int, head_pos: Vector2i, occupied: Dictiona
     # 予告済みなら頭の前1マスを攻撃する。胴体は攻撃しない。
     if bool(host.enemies[index]["telegraph_active"]):
         var target: Vector2i = host.enemies[index]["telegraph_target"]
-        _enemy_attack(host, head_pos, target)
+        _enemy_attack(host, head_pos, target, "serpent")
         host.enemies[index]["telegraph_active"] = false
         occupied[head_pos] = true
         occupied[tail_pos] = true
@@ -171,7 +171,7 @@ func _long_serpent_take_turn(host, index: int, occupied: Dictionary) -> void:
     # 予告済みなら頭の前1マスを攻撃する。胴体4マスは攻撃しない。
     if bool(host.enemies[index]["telegraph_active"]):
         var target: Vector2i = host.enemies[index]["telegraph_target"]
-        _enemy_attack(host, head_pos, target)
+        _enemy_attack(host, head_pos, target, "long_serpent")
         host.enemies[index]["telegraph_active"] = false
         for cell in segments:
             occupied[cell] = true
@@ -216,7 +216,7 @@ func _heavy_take_turn(host, index: int, top_left: Vector2i, occupied: Dictionary
     # 予告済みなら固定された1マスを攻撃する。
     if bool(host.enemies[index]["telegraph_active"]):
         var target: Vector2i = host.enemies[index]["telegraph_target"]
-        _enemy_attack(host, top_left, target)
+        _enemy_attack(host, top_left, target, "heavy")
         host.enemies[index]["telegraph_active"] = false
         for cell in current_cells:
             occupied[cell] = true
@@ -268,7 +268,7 @@ func _tank_fire(host, top_left: Vector2i, d: Vector2i) -> void:
         if not host.last_attack_cells.has(p):
             host.last_attack_cells.append(p)
     if host.player_pos in beam:
-        host._apply_player_damage(1)
+        host._apply_player_damage(1, "tank")
 
 
 func _tank_take_turn(host, index: int, top_left: Vector2i, occupied: Dictionary) -> void:
@@ -335,7 +335,7 @@ func _cross_fire(host, center: Vector2i) -> void:
         if host.player_pos in ray:
             hit_player = true
     if hit_player:
-        host._apply_player_damage(1)
+        host._apply_player_damage(1, "cross_discharge")
 
 
 func _cross_discharge_take_turn(host, index: int, center: Vector2i, occupied: Dictionary) -> void:
@@ -406,7 +406,7 @@ func _artillery_fire(host, left_cell: Vector2i) -> void:
             host.last_attack_cells.append(p)
 
     if host.player_pos in left_ray or host.player_pos in right_ray:
-        host._apply_player_damage(1)
+        host._apply_player_damage(1, "artillery")
 
 
 func _runner_take_turn(host, index: int, runner_pos: Vector2i, occupied: Dictionary) -> void:
@@ -465,7 +465,7 @@ func _charger_take_turn(host, index: int, charger_pos: Vector2i, occupied: Dicti
         # charge_dirがZEROなら、隣接時の通常1マス攻撃。
         if charge_dir == Vector2i.ZERO:
             var melee_target: Vector2i = host.enemies[index]["telegraph_target"]
-            _enemy_attack(host, charger_pos, melee_target)
+            _enemy_attack(host, charger_pos, melee_target, "charger")
             occupied[charger_pos] = true
             return
 
@@ -482,7 +482,7 @@ func _charger_take_turn(host, index: int, charger_pos: Vector2i, occupied: Dicti
             if not host.last_attack_cells.has(next):
                 host.last_attack_cells.append(next)
             if next == host.player_pos:
-                host._apply_player_damage(1)
+                host._apply_player_damage(1, "charger")
                 # プレイヤーと同じマスには入れないため、現在位置で突進終了。
                 break
             cur = next
@@ -556,17 +556,17 @@ func _turret_fire(host, turret_pos: Vector2i, d: Vector2i) -> void:
             host.last_attack_cells.append(p)
 
     if host.player_pos in ray:
-        host._apply_player_damage(1)
+        host._apply_player_damage(1, "turret")
 
 
-func _enemy_attack(host, _enemy_pos: Vector2i, target: Vector2i) -> void:
+func _enemy_attack(host, _enemy_pos: Vector2i, target: Vector2i, cause: String = "enemy_attack") -> void:
     host._play_sfx(SFX_ENEMY_MELEE)
     # 通常敵の攻撃は帯電状態を変更しない。攻撃マスは演出表示だけ残す。
     if host._is_floor(target) and not host.last_attack_cells.has(target):
         host.last_attack_cells.append(target)
 
     if host.player_pos == target:
-        host._apply_player_damage(1)
+        host._apply_player_damage(1, cause)
 
 
 
