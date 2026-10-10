@@ -92,7 +92,7 @@ func draw_telegraphs() -> void:
                 var tr: Rect2 = h._cell_rect(telegraph_target).grow(-3.0)
                 h.draw_rect(tr, h.C_TELEGRAPH)
                 h.draw_rect(tr, flash_edge, false, border_width)
-                h.draw_string(ThemeDB.fallback_font, h._cell_center(telegraph_target) + Vector2(-5, 6), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, flash_edge)
+                h.draw_string(h.ui_font, h._cell_center(telegraph_target) + Vector2(-5, 6), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, flash_edge)
 
 func draw_last_attack_cells() -> void:
     for p in h.last_attack_cells:
@@ -223,7 +223,7 @@ func draw_enemies() -> void:
             if bool(e["telegraph_active"]):
                 var turns_left: int = int(e.get("telegraph_turns", 0))
                 var turn_text: String = str(turns_left)
-                var turn_font: Font = ThemeDB.fallback_font
+                var turn_font: Font = h.ui_font
                 var turn_font_size := 18
                 var turn_size: Vector2 = turn_font.get_string_size(turn_text, HORIZONTAL_ALIGNMENT_LEFT, -1, turn_font_size)
                 var turn_plate := Rect2(
@@ -407,7 +407,7 @@ func draw_enemy_hit_flashes() -> void:
     _draw_enemy_damage_numbers()
 
 func _draw_enemy_damage_numbers() -> void:
-    var font: Font = ThemeDB.fallback_font
+    var font: Font = h.ui_font
     for item in h.enemy_damage_numbers:
         var time_left: float = float(item.get("time", 0.0))
         var duration: float = maxf(0.001, float(item.get("duration", h.ENEMY_DAMAGE_NUMBER_DURATION)))
@@ -481,7 +481,7 @@ func draw_player() -> void:
             h.draw_line(pc + player_dir * 2.0, pc + player_dir * 16.0, Color.WHITE, 4.0, true)
 
 func draw_enemy_hp_labels() -> void:
-    # HPは敵の外へ張り出さず、本体の中へ小さな現在値だけを重ねる。
+    # HPは敵の外へ張り出さず、本体の中へ大きめの現在値だけを重ねる。
     # 盤面の移動先・帯電状態を隠さないことを優先し、背景プレートも使わない。
     var base_offset: Vector2 = h._damage_feedback_shake_offset() + h._boss_shake_offset() + h._enemy_impact_shake_offset()
     for enemy in h.enemies:
@@ -527,8 +527,8 @@ func _draw_enemy_hp_number_inside(enemy: Dictionary) -> void:
         return
 
     var hp_text: String = str(current_hp)
-    var font: Font = ThemeDB.fallback_font
-    var font_size: int = 13
+    var font: Font = h.ui_font
+    var font_size: int = 26
     var text_size: Vector2 = font.get_string_size(hp_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
     var center: Vector2 = _enemy_hp_anchor(enemy)
     var baseline := Vector2(center.x - text_size.x * 0.5, center.y + font_size * 0.36)
@@ -536,7 +536,7 @@ func _draw_enemy_hp_number_inside(enemy: Dictionary) -> void:
     # 被弾直後は大きいダメージ数字を先に読ませるため、HPだけ少し薄くする。
     var reacting: bool = float(enemy.get("hit_fx_time", 0.0)) > 0.0
     var alpha: float = 0.58 if reacting else 0.96
-    _draw_outlined_text(font, baseline, hp_text, font_size, Color(1.0, 1.0, 1.0, alpha), 1.0, alpha)
+    _draw_outlined_text(font, baseline, hp_text, font_size, Color(1.0, 1.0, 1.0, alpha), 2.0, alpha)
 
 func _draw_outlined_text(font: Font, baseline: Vector2, text: String, font_size: int, fill: Color, outline_width: float, alpha_scale: float = 1.0) -> void:
     # 8方向へ暗い縁を置き、床色・敵色・白フラッシュのどの上でも数字の形を保つ。

@@ -48,7 +48,7 @@ func _draw_side_panels() -> void:
     h.draw_rect(stage_frame, h.C_FLOOR_EDGE, false, 1.0)
 
 func _draw_hud() -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
 
     # 見出しを置かず、カードそのものを上から見せる。
     for i in range(h.hand.size()):
@@ -101,13 +101,12 @@ func _draw_hud() -> void:
     elif remain_ratio <= 0.25:
         h.draw_string(font, Vector2(1074, 474), "注意", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, h.C_WARNING)
 
-    # 通常操作は右下へ弱く残す。カード選択中は専用ガイドへ切り替える。
-    if h.aim_mode == "":
-        h.draw_string(font, Vector2(1074, 580), "矢印  移動", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
-        h.draw_string(font, Vector2(1074, 605), "1〜3  カード", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
-        h.draw_string(font, Vector2(1074, 630), "0  リロール", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
+    # 通常操作は右下へ4段のキートップ式で表示。
+    # 照準中は中央下のコンテキストガイドへ切り替え、二重表示を避ける。
+    if h.aim_mode == "" and not h.game_over and not h.run_clear and not h.stage_clear:
+        _draw_basic_control_guide()
 
-    if h.aim_mode != "":
+    if h.aim_mode != "" and not h.game_over and not h.run_clear and not h.stage_clear:
         _draw_context_action_guide()
 
     # メッセージは重要な結果・エラーだけ。文字を大きくし、1〜2行で読ませる。
@@ -124,27 +123,70 @@ func _draw_hud() -> void:
 
 
     if h.run_clear:
-        h.draw_rect(Rect2(Vector2(437, 148), Vector2(446, 285)), Color(0, 0, 0, 0.92))
-        h.draw_string(font, Vector2(505, 199), "GAME CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_CHARGED_INNER)
-        h.draw_string(font, Vector2(506, 231), "全10ステージ踏破", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_TEXT)
+        h.draw_rect(Rect2(Vector2(437, 128), Vector2(446, 345)), Color(0, 0, 0, 0.92))
+        h.draw_string(font, Vector2(505, 179), "GAME CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_CHARGED_INNER)
+        h.draw_string(font, Vector2(506, 211), "全10ステージ踏破", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_TEXT)
 
-        h.draw_string(font, Vector2(493, 282), "クリア時間", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 282), h._format_clear_time(h.run_elapsed_seconds), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-        h.draw_string(font, Vector2(493, 322), "歩数", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 322), str(h.step_count), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-        h.draw_string(font, Vector2(493, 362), "被ダメージ", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 362), str(h.damage_taken), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 262), "クリア時間", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 262), h._format_clear_time(h.run_elapsed_seconds), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 302), "ターン数", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 302), str(h.turn), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 342), "歩数", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 342), str(h.step_count), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 382), "被ダメージ", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 382), str(h.damage_taken), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
 
-        h.draw_line(Vector2(493, 384), Vector2(827, 384), h.C_FLOOR_EDGE, 1.0)
-        h.draw_string(font, Vector2(590, 414), "Rでやり直す", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
+        h.draw_line(Vector2(493, 414), Vector2(827, 414), h.C_FLOOR_EDGE, 1.0)
+        h.draw_string(font, Vector2(590, 452), "Zでタイトルへ", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
 
     if h.game_over:
-        h.draw_rect(Rect2(Vector2(437, 205), Vector2(446, 142)), Color(0, 0, 0, 0.88))
-        h.draw_string(font, Vector2(535, 263), "機体停止", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_ENEMY)
-        h.draw_string(font, Vector2(494, 321), "R  この階層をやり直す", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
+        h.draw_rect(Rect2(Vector2(437, 142), Vector2(446, 356)), Color(0, 0, 0, 0.92))
+        h.draw_string(font, Vector2(526, 193), "GAME OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_ENEMY)
+        h.draw_string(font, Vector2(566, 225), "機体停止", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_TEXT)
+
+        h.draw_string(font, Vector2(493, 278), "FLOOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 278), "%02d / %02d" % [h.current_floor, h.TOTAL_FLOORS], HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 318), "TIME", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 318), h._format_clear_time(h.run_elapsed_seconds), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+        h.draw_string(font, Vector2(493, 358), "TURN", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
+        h.draw_string(font, Vector2(701, 358), str(h.turn), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
+
+        h.draw_line(Vector2(493, 392), Vector2(827, 392), h.C_FLOOR_EDGE, 1.0)
+        h.draw_string(font, Vector2(532, 432), "Z  RETRY", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
+        h.draw_string(font, Vector2(678, 432), "X  TITLE", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
+
+func _draw_basic_control_guide() -> void:
+    var font: Font = h.ui_font
+    var label_x: float = 1182.0
+    var row_baselines := [557.0, 590.0, 623.0, 656.0]
+
+    _draw_control_key_row(["↑", "↓", "←", "→"], Vector2(1074, row_baselines[0] - 20.0))
+    h.draw_string(font, Vector2(label_x, row_baselines[0]), "MOVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
+
+    _draw_control_key_row(["1", "2", "3"], Vector2(1074, row_baselines[1] - 20.0))
+    h.draw_string(font, Vector2(label_x, row_baselines[1]), "SKILL", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
+
+    _draw_control_key_row(["0"], Vector2(1074, row_baselines[2] - 20.0))
+    h.draw_string(font, Vector2(label_x, row_baselines[2]), "REROLL", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
+
+    _draw_control_key_row(["R"], Vector2(1074, row_baselines[3] - 20.0))
+    h.draw_string(font, Vector2(label_x, row_baselines[3]), "RESET", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, h.C_DIM)
+
+func _draw_control_key_row(keys: Array[String], origin: Vector2) -> void:
+    var x: float = origin.x
+    for key in keys:
+        var key_rect := Rect2(Vector2(x, origin.y), Vector2(21, 25))
+        _draw_control_keycap(key_rect, key)
+        x += 25.0
+
+func _draw_control_keycap(rect: Rect2, key: String) -> void:
+    var font: Font = h.ui_font
+    h.draw_rect(rect, Color(0.055, 0.085, 0.115, 1.0))
+    h.draw_rect(rect, h.C_TEXT, false, 1.0)
+    h.draw_string(font, rect.position + Vector2(0, 18), key, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 14, h.C_TEXT)
 
 func _draw_restart_confirm() -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
     # 盤面/HUD全体を暗くし、確認だけを画面座標の最前面へ固定する。
     h.draw_rect(Rect2(Vector2.ZERO, h.WINDOW_SIZE), Color(0.0, 0.0, 0.0, 0.60))
 
@@ -161,7 +203,7 @@ func _draw_restart_confirm() -> void:
     h.draw_string(font, Vector2(458, 429), "←→ 選択    Z 決定    X キャンセル", HORIZONTAL_ALIGNMENT_CENTER, 364, 16, h.C_DIM)
 
 func _draw_restart_choice(rect: Rect2, label: String, selected: bool) -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
     var fill: Color = Color(0.12, 0.18, 0.24, 1.0) if selected else Color(0.045, 0.065, 0.085, 1.0)
     var edge: Color = Color.WHITE if selected else Color(h.C_FLOOR_EDGE)
     h.draw_rect(rect, fill)
@@ -177,6 +219,8 @@ func _context_action_guide_text() -> String:
         CARD_DASH:
             if h.dash_branch_options.size() > 1:
                 return "↑↓←→ 分岐選択    Z ここで発動    X キャンセル"
+            if not h.dash_route_customized:
+                return "↑↓←→ 開始方向    Z 発動    X キャンセル"
             return "Z 発動    X キャンセル"
         CARD_SURGE:
             return "Z 発動    X キャンセル"
@@ -187,7 +231,7 @@ func _context_action_guide_text() -> String:
     return "Z 決定    X キャンセル"
 
 func _draw_context_action_guide() -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
     var guide_rect := Rect2(Vector2(418, 488), Vector2(500, 34))
     h.draw_rect(guide_rect, Color(0.02, 0.05, 0.08, 0.94))
     h.draw_rect(guide_rect, Color.WHITE, false, 1.0)
@@ -267,7 +311,7 @@ func _draw_card_panel_animated(slot: int, rect: Rect2) -> void:
     h.draw_set_transform(shake)
 
 func _draw_card_panel(slot: int, rect: Rect2) -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
     var card_id: String = h.hand[slot]
     var cost: int = h._card_cost(card_id)
     var affordable: bool = h.bat >= cost
@@ -321,7 +365,7 @@ func _draw_card_panel(slot: int, rect: Rect2) -> void:
     h.draw_string(font, info_rect.position + Vector2(4, 16), h._card_short_info(card_id), HORIZONTAL_ALIGNMENT_CENTER, info_rect.size.x - 8.0, 15, main_text)
 
 func _draw_reroll_panel(rect: Rect2) -> void:
-    var font := ThemeDB.fallback_font
+    var font: Font = h.ui_font
     var affordable: bool = h.bat >= h.REROLL_COST
     var locked_by_selection: bool = h.aim_mode != ""
     var usable: bool = affordable and not locked_by_selection

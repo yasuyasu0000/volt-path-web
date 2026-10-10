@@ -39,6 +39,8 @@ func setup() -> void:
     _register(&"tank_fire", preload("res://sfx/tank_fire.wav"), -5.0)
     _register(&"ui_reroll", preload("res://sfx/ui_reroll.wav"), -12.0)
     _register(&"ui_bat_denied", preload("res://sfx/ui_bat_denied.wav"), -10.0)
+    _register(&"ui_menu_move", preload("res://sfx/ui_menu_move.wav"), -13.0)
+    _register(&"ui_menu_decide", preload("res://sfx/ui_menu_decide.wav"), -10.0)
     _register(&"stage_clear", preload("res://sfx/stage_clear.wav"), -7.0)
     _register(&"game_clear", preload("res://sfx/game_clear.wav"), -4.0)
     _register(&"game_over_hp", preload("res://sfx/game_over_hp.wav"), -4.0)

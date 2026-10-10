@@ -2,7 +2,7 @@ extends RefCounted
 
 # Web-only GA4 bridge. Empty measurement ID = completely disabled.
 # Set [analytics] ga4_measurement_id in project.godot when analytics should go live.
-const GAME_VERSION := "0.924"
+const GAME_VERSION := "0.939"
 
 var enabled := false
 var measurement_id := ""

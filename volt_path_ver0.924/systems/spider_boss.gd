@@ -1,15 +1,20 @@
 extends RefCounted
 
+const GameBalance = preload("res://systems/game_balance.gd")
+
 # FLOOR 10 spider boss gameplay/state authority.
 # Rendering remains in main.gd for now so the existing Node2D draw pipeline is unchanged.
 
-const LEG_HP := 12
+const LEG_CELL_COUNT := 9
+const LEG_HP := GameBalance.ENEMY_HP_PER_CELL * LEG_CELL_COUNT
 const LEG_COUNT := 4
+const LEG_MOVE_INTERVAL_TURNS := 4
 const STOMP_FX_DURATION := 0.42
 const BREAK_FX_DURATION := 0.90
 const SHAKE_DURATION := 0.22
 
 var leg_cursor := 0
+var boss_turn_count := 0
 var acted_leg_ids: Dictionary = {}
 var stomp_fx_time := 0.0
 var stomp_fx_cells: Array[Vector2i] = []
@@ -22,6 +27,7 @@ var shake_sequence := 0
 
 func reset() -> void:
     leg_cursor = 0
+    boss_turn_count = 0
     acted_leg_ids.clear()
     stomp_fx_time = 0.0
     stomp_fx_cells.clear()
@@ -65,11 +71,14 @@ func _make_leg(leg_id: int, pos: Vector2i) -> Dictionary:
         "telegraph_active": false,
         "telegraph_target": pos,
         "last_stomp": Vector2i(-99, -99),
+        "next_move_turn": 1,
+        "telegraph_turn": 0,
     }
 
 func spawn_legs(enemies: Array[Dictionary]) -> void:
     enemies.clear()
     leg_cursor = 0
+    boss_turn_count = 0
     acted_leg_ids.clear()
     # 3x3脚が外周壁の内側へぴったり収まる四隅。
     enemies.append(_make_leg(0, Vector2i(1, 1)))
@@ -94,28 +103,68 @@ func all_legs_destroyed(enemies: Array[Dictionary]) -> bool:
             return false
     return found
 
-func _leg_can_act(e: Dictionary) -> bool:
+func begin_turn() -> void:
+    boss_turn_count += 1
+
+func _leg_id(e: Dictionary) -> int:
+    return int(e.get("leg_id", -1))
+
+func _normalize_round(enemies: Array[Dictionary]) -> void:
+    # 破壊済みの脚は現在の1巡から除外する。
+    var alive_ids: Array[int] = []
+    for e in enemies:
+        if str(e.get("type", "")) != "boss_leg" or bool(e.get("destroyed", false)):
+            continue
+        alive_ids.append(_leg_id(e))
+
+    var stale_ids: Array = []
+    for key in acted_leg_ids.keys():
+        if int(key) not in alive_ids:
+            stale_ids.append(key)
+    for key in stale_ids:
+        acted_leg_ids.erase(key)
+
+    if alive_ids.is_empty():
+        acted_leg_ids.clear()
+        return
+
+    # 生存している全脚が1回ずつ動いたら1巡終了。
+    # 次の行動候補を探す前に新しい巡へ切り替える。
+    for leg_id in alive_ids:
+        if not acted_leg_ids.has(leg_id):
+            return
+    acted_leg_ids.clear()
+
+func _leg_can_act_on_turn(e: Dictionary, action_turn: int) -> bool:
     if str(e.get("type", "")) != "boss_leg" or bool(e.get("destroyed", false)):
         return false
-    return not acted_leg_ids.has(int(e.get("leg_id", -1)))
+    if bool(e.get("telegraph_active", false)):
+        return false
+    # 同じ1巡の中では、すでに動いた脚は再行動できない。
+    if acted_leg_ids.has(_leg_id(e)):
+        return false
+    # 1巡が終わっていても、各脚は前回行動から4ターン空ける。
+    return int(e.get("next_move_turn", 1)) <= action_turn
 
-func _has_eligible_leg(enemies: Array[Dictionary]) -> bool:
-    for e in enemies:
-        if _leg_can_act(e):
-            return true
-    return false
-
-func find_next_live_leg(enemies: Array[Dictionary], start_index: int) -> int:
+func find_next_live_leg(enemies: Array[Dictionary], start_index: int, action_turn: int = -1) -> int:
     if enemies.is_empty():
         return -1
-
-    # 生存脚が全て1回ずつ行動したら、次の4脚サイクルを開始する。
-    if not _has_eligible_leg(enemies):
-        acted_leg_ids.clear()
-
+    _normalize_round(enemies)
+    var target_turn: int = action_turn
+    if target_turn < 0:
+        target_turn = boss_turn_count + 1
     for offset in range(enemies.size()):
         var i: int = (start_index + offset) % enemies.size()
-        if _leg_can_act(enemies[i]):
+        if _leg_can_act_on_turn(enemies[i], target_turn):
+            return i
+    return -1
+
+func find_telegraphed_leg(enemies: Array[Dictionary]) -> int:
+    for i in range(enemies.size()):
+        var e: Dictionary = enemies[i]
+        if str(e.get("type", "")) != "boss_leg" or bool(e.get("destroyed", false)):
+            continue
+        if bool(e.get("telegraph_active", false)) and int(e.get("telegraph_turn", 0)) <= boss_turn_count:
             return i
     return -1
 
@@ -147,32 +196,38 @@ func choose_stomp_target(enemies: Array[Dictionary], index: int, player_pos: Vec
     var best: Vector2i = current_top_left
     var best_score := 1000000
 
-    # 脚の中心を基準に、周囲8方向へ1マスだけ移動する。
-    # Chebyshev距離を最優先、Manhattan距離を同点時の補助にして
-    # プレイヤーへ自然に近づく方向（斜めを含む）を選ぶ。
-    for oy in range(-1, 2):
-        for ox in range(-1, 2):
-            if ox == 0 and oy == 0:
-                continue
-            var candidate := current_top_left + Vector2i(ox, oy)
-            if not _target_is_free(enemies, candidate, index, is_floor):
-                continue
-            var center := candidate + Vector2i(1, 1)
-            var score: int = _chebyshev(center, player_pos) * 100 + _manhattan(center, player_pos)
-            if score < best_score:
-                best_score = score
-                best = candidate
+    # 脚の中心を基準に、上下左右の4方向へ1マスだけ移動する。
+    # Manhattan距離を最優先し、同点ならChebyshev距離で
+    # プレイヤーへより自然に近づく軸を選ぶ。斜め移動はしない。
+    var dirs: Array[Vector2i] = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
+    for d in dirs:
+        var candidate := current_top_left + d
+        if not _target_is_free(enemies, candidate, index, is_floor):
+            continue
+        var center := candidate + Vector2i(1, 1)
+        var score: int = _manhattan(center, player_pos) * 100 + _chebyshev(center, player_pos)
+        if score < best_score:
+            best_score = score
+            best = candidate
 
     return best
 
 func schedule_next_telegraph(enemies: Array[Dictionary], player_pos: Vector2i, is_floor: Callable) -> bool:
-    var index: int = find_next_live_leg(enemies, leg_cursor)
+    # 予告は「次のボスターンに動ける脚」1本だけに出す。
+    # 同一巡で行動済みの脚は、まだ動いていない生存脚がいる間は候補外。
+    # 1巡終了後も各脚の4ターン間隔は維持する。
+    for e in enemies:
+        if str(e.get("type", "")) == "boss_leg" and not bool(e.get("destroyed", false)) and bool(e.get("telegraph_active", false)):
+            return true
+    var action_turn := boss_turn_count + 1
+    var index: int = find_next_live_leg(enemies, leg_cursor, action_turn)
     if index == -1:
         return false
     leg_cursor = index
     var target: Vector2i = choose_stomp_target(enemies, index, player_pos, is_floor)
     enemies[index]["telegraph_target"] = target
     enemies[index]["telegraph_active"] = true
+    enemies[index]["telegraph_turn"] = action_turn
     return true
 
 func stomp(enemies: Array[Dictionary], index: int, last_attack_cells: Array[Vector2i], player_pos: Vector2i, is_floor: Callable) -> Dictionary:
@@ -192,7 +247,10 @@ func stomp(enemies: Array[Dictionary], index: int, last_attack_cells: Array[Vect
     enemies[index]["pos"] = target
     enemies[index]["last_stomp"] = target
     enemies[index]["telegraph_active"] = false
-    acted_leg_ids[int(enemies[index].get("leg_id", index))] = true
+    enemies[index]["telegraph_turn"] = 0
+    enemies[index]["next_move_turn"] = boss_turn_count + LEG_MOVE_INTERVAL_TURNS
+    acted_leg_ids[_leg_id(enemies[index])] = true
+    _normalize_round(enemies)
     return {"valid": true, "hit_player": player_pos in cells, "cells": cells}
 
 func mark_leg_destroyed(enemies: Array[Dictionary], index: int, cell_center: Callable) -> bool:
@@ -206,6 +264,8 @@ func mark_leg_destroyed(enemies: Array[Dictionary], index: int, cell_center: Cal
     e["destroyed"] = true
     e["telegraph_active"] = false
     enemies[index] = e
+    acted_leg_ids.erase(_leg_id(e))
+    _normalize_round(enemies)
     break_fx_center = Vector2(cell_center.call(leg_pos + Vector2i(1, 1)))
     break_destroyed_count = LEG_COUNT - alive_leg_count(enemies)
     break_fx_time = BREAK_FX_DURATION

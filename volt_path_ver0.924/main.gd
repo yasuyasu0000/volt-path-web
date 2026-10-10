@@ -1,6 +1,7 @@
 extends Node2D
 
 const CardCatalog = preload("res://systems/card_catalog.gd")
+const GameBalance = preload("res://systems/game_balance.gd")
 const SfxManager = preload("res://systems/sfx_manager.gd")
 const SpiderBoss = preload("res://systems/spider_boss.gd")
 const SkillFx = preload("res://systems/skill_fx.gd")
@@ -10,8 +11,9 @@ const BoardRenderer = preload("res://systems/board_renderer.gd")
 const TerrainSystem = preload("res://systems/terrain_system.gd")
 const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
+const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.924
+# VOLT PATH ver0.939
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -26,11 +28,11 @@ const GRID_ORIGIN := Vector2(337, 52)
 const WINDOW_SIZE := Vector2(1280, 720)
 const MAX_BAT := 10
 const MAX_HP := 6
-const REROLL_COST := 2
+const REROLL_COST := GameBalance.REROLL_COST
 const TOTAL_FLOORS := 10
 const AUTO_PASS_DELAY := 1.0
-const FULL_CHARGE_MOVE_DAMAGE := 1
-const FULL_CHARGE_ENEMY_DAMAGE := 1
+const FULL_CHARGE_MOVE_DAMAGE := GameBalance.FULL_CHARGE_MOVE_DAMAGE
+const FULL_CHARGE_ENEMY_DAMAGE := GameBalance.FULL_CHARGE_ENEMY_DAMAGE
 const FULL_CHARGE_FLASH_INTERVAL := 0.16
 
 const DAMAGE_FEEDBACK_DURATION := 0.22
@@ -64,6 +66,8 @@ const SFX_TANK_COUNT := &"tank_count"
 const SFX_TANK_FIRE := &"tank_fire"
 const SFX_UI_REROLL := &"ui_reroll"
 const SFX_UI_BAT_DENIED := &"ui_bat_denied"
+const SFX_UI_MENU_MOVE := &"ui_menu_move"
+const SFX_UI_MENU_DECIDE := &"ui_menu_decide"
 const SFX_STAGE_CLEAR := &"stage_clear"
 const SFX_GAME_CLEAR := &"game_clear"
 const SFX_GAME_OVER_HP := &"game_over_hp"
@@ -220,6 +224,7 @@ var board_renderer = null
 var terrain_system = null
 var enemy_geometry = null
 var web_analytics = null
+var ui_font: Font = null
 
 
 var aim_mode := ""
@@ -248,8 +253,10 @@ var stage_restart_snapshot: Dictionary = {}
 var _redraw_accumulator := 0.0
 var title_screen_active := true
 var title_menu_index := 0
+var title_exit_pending := false
 
 func _ready() -> void:
+    ui_font = UiFont.build()
     rng.randomize()
     sfx_manager = SfxManager.new()
     add_child(sfx_manager)
@@ -269,6 +276,15 @@ func _ready() -> void:
     web_analytics.setup()
     title_screen_active = true
     title_menu_index = 0
+    title_exit_pending = false
+    queue_redraw()
+
+func _return_to_title() -> void:
+    title_screen_active = true
+    title_menu_index = 0
+    title_exit_pending = false
+    restart_confirm_active = false
+    restart_confirm_yes = false
     queue_redraw()
 
 func _play_sfx(id: StringName) -> void:
@@ -363,9 +379,10 @@ func _process(delta: float) -> void:
     # queue_redraw() is centralized here so CanvasItem can reuse cached draw commands.
     var redraw_priority := 0
 
-    # クリア時間は実際にプレイしている時間だけを計測し、
-    # STAGE CLEARの自動遷移演出中は加算しない。
-    if not game_over and not run_clear and not stage_clear:
+    # クリア時間はプレイヤーが入力できる時間だけを計測する。
+    # スキル/カード交換/リロール演出、自動待機、STAGE CLEARなど、
+    # プレイヤー側で短縮できない待ち時間は記録へ含めない。
+    if _run_timer_should_advance():
         run_elapsed_seconds += delta
 
     if damage_fx_time_left > 0.0:
@@ -459,6 +476,15 @@ func _process(delta: float) -> void:
         redraw_priority = maxi(redraw_priority, 1)
 
     _schedule_visual_redraw(delta, redraw_priority)
+
+func _run_timer_should_advance() -> bool:
+    if game_over or run_clear or stage_clear:
+        return false
+    if auto_pass_pending or reroll_anim_active or card_replace_anim_active or skill_turn_pending:
+        return false
+    if skill_fx != null and bool(skill_fx.active):
+        return false
+    return true
 
 func _schedule_visual_redraw(delta: float, priority: int) -> void:
     if priority <= 0:
@@ -942,24 +968,26 @@ func _boss_stomp_knockback_target(stomp_cells: Array[Vector2i]) -> Vector2i:
 func _boss_take_turn() -> void:
     if spider_boss == null or _boss_all_legs_destroyed():
         return
-    var index: int = int(spider_boss.find_next_live_leg(enemies, int(spider_boss.leg_cursor)))
-    if index == -1:
-        return
-    if not bool(enemies[index].get("telegraph_active", false)):
-        spider_boss.leg_cursor = index
-        _boss_schedule_next_telegraph()
-        return
-    _boss_stomp(index)
-    if hp <= 0:
-        return
-    spider_boss.leg_cursor = (index + 1) % enemies.size()
+
+    # 1巡の中では生存脚を1本ずつ動かし、行動済み脚は未行動脚が残る間は再行動しない。
+    # さらに各脚は個別に4ターン間隔を維持する。1ターンに動く脚は最大1本。
+    spider_boss.begin_turn()
+    var index: int = int(spider_boss.find_telegraphed_leg(enemies))
+    if index != -1:
+        _boss_stomp(index)
+        if hp <= 0:
+            return
+        spider_boss.leg_cursor = (index + 1) % enemies.size()
+
+    # 次のボスターンに「この巡で未行動」かつ4ターン間隔を満たす脚がいれば1ターン予告を出す。
+    # 候補がいない場合は何もせず、休止ターンになる。
     _boss_schedule_next_telegraph()
 
 func _make_chaser_enemy(pos: Vector2i) -> Dictionary:
     return {
         "type": "chaser",
         "pos": pos,
-        "hp": 3,
+        "hp": GameBalance.ENEMY_HP_PER_CELL,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO
@@ -969,7 +997,7 @@ func _make_turret_enemy(pos: Vector2i) -> Dictionary:
     return {
         "type": "turret",
         "pos": pos,
-        "hp": 3,
+        "hp": GameBalance.ENEMY_HP_PER_CELL,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -981,7 +1009,7 @@ func _make_charger_enemy(pos: Vector2i) -> Dictionary:
     return {
         "type": "charger",
         "pos": pos,
-        "hp": 3,
+        "hp": GameBalance.ENEMY_HP_PER_CELL,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -993,7 +1021,7 @@ func _make_runner_enemy(pos: Vector2i) -> Dictionary:
     return {
         "type": "runner",
         "pos": pos,
-        "hp": 2,
+        "hp": GameBalance.ENEMY_HP_PER_CELL,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO
@@ -1007,7 +1035,7 @@ func _make_serpent_enemy(head: Vector2i, tail: Vector2i) -> Dictionary:
         "type": "serpent",
         "pos": head,
         "tail": tail,
-        "hp": 4,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * 2,
         "facing": face,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO
@@ -1023,7 +1051,7 @@ func _make_long_serpent_enemy(segments: Array[Vector2i]) -> Dictionary:
         "type": "long_serpent",
         "pos": segments[0],
         "segments": segments.duplicate(),
-        "hp": 8,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * segments.size(),
         "facing": face,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO
@@ -1033,7 +1061,7 @@ func _make_heavy_enemy(top_left: Vector2i) -> Dictionary:
     return {
         "type": "heavy",
         "pos": top_left,
-        "hp": 6,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * 4,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -1044,7 +1072,7 @@ func _make_artillery_enemy(left_cell: Vector2i) -> Dictionary:
     return {
         "type": "artillery",
         "pos": left_cell,
-        "hp": 5,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * 3,
         "facing": Vector2i.RIGHT,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -1055,7 +1083,7 @@ func _make_cross_discharge_enemy(center: Vector2i) -> Dictionary:
     return {
         "type": "cross_discharge",
         "pos": center,
-        "hp": 8,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * 5,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -1066,7 +1094,7 @@ func _make_tank_enemy(top_left: Vector2i) -> Dictionary:
     return {
         "type": "tank",
         "pos": top_left,
-        "hp": 12,
+        "hp": GameBalance.ENEMY_HP_PER_CELL * 9,
         "facing": Vector2i.DOWN,
         "telegraph_active": false,
         "telegraph_target": Vector2i.ZERO,
@@ -1395,18 +1423,36 @@ func _replace_hand_slot(slot: int) -> void:
     if card_id != "":
         hand[slot] = card_id
 
+func _title_exit_available() -> bool:
+    # ブラウザではページ/タブをゲーム側から閉じられないためEXITを出さない。
+    return not OS.has_feature("web")
+
 func _handle_title_input(keycode: Key) -> void:
+    if title_exit_pending:
+        return
     match keycode:
         KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT:
+            # Web版はSTARTのみ。存在しないEXITへカーソルを動かさない。
+            if not _title_exit_available():
+                title_menu_index = 0
+                return
             title_menu_index = 1 - title_menu_index
+            _play_sfx(SFX_UI_MENU_MOVE)
             queue_redraw()
         KEY_Z, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-            if title_menu_index == 0:
+            _play_sfx(SFX_UI_MENU_DECIDE)
+            if title_menu_index == 0 or not _title_exit_available():
                 _start_run_from_title()
             else:
-                get_tree().quit()
+                _quit_from_title_after_sfx()
         _:
             return
+
+func _quit_from_title_after_sfx() -> void:
+    # EXITでも決定音が途中で切れないよう、短いSE分だけ終了を待つ。
+    title_exit_pending = true
+    await get_tree().create_timer(0.14).timeout
+    get_tree().quit()
 
 func _start_run_from_title() -> void:
     reset_run()
@@ -1417,7 +1463,7 @@ func _start_run_from_title() -> void:
     queue_redraw()
 
 func _draw_title_screen() -> void:
-    var font: Font = ThemeDB.fallback_font
+    var font: Font = ui_font
     var center_x := WINDOW_SIZE.x * 0.5
 
     # 本編と同じ電気色を使った、情報量を抑えたタイトル画面。
@@ -1431,14 +1477,17 @@ func _draw_title_screen() -> void:
     draw_string(font, Vector2(center_x - 260.0, 205.0), "VOLT PATH", HORIZONTAL_ALIGNMENT_CENTER, 520.0, 58, title_color)
     draw_string(font, Vector2(center_x - 220.0, 244.0), "CHARGE  /  CONNECT  /  SURVIVE", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 15, C_DIM)
 
-    _draw_title_menu_item(Rect2(center_x - 150.0, 330.0, 300.0, 58.0), "START", title_menu_index == 0)
-    _draw_title_menu_item(Rect2(center_x - 150.0, 404.0, 300.0, 58.0), "EXIT", title_menu_index == 1)
+    _draw_title_menu_item(Rect2(center_x - 150.0, 330.0, 300.0, 58.0), "START", true if not _title_exit_available() else title_menu_index == 0)
+    if _title_exit_available():
+        _draw_title_menu_item(Rect2(center_x - 150.0, 404.0, 300.0, 58.0), "EXIT", title_menu_index == 1)
+        draw_string(font, Vector2(center_x - 220.0, 530.0), "↑↓  SELECT    Z / ENTER  DECIDE", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
+    else:
+        draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 220.0, 530.0), "↑↓  SELECT    Z / ENTER  DECIDE", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.924", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.939", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
-    var font: Font = ThemeDB.fallback_font
+    var font: Font = ui_font
     var fill := C_PANEL_ACTIVE if selected else C_PANEL
     var edge := C_CHARGED_INNER if selected else C_FLOOR_EDGE
     draw_rect(rect, fill, true)
@@ -1471,17 +1520,26 @@ func _unhandled_input(event: InputEvent) -> void:
         _handle_restart_confirm_input(event.keycode)
         return
 
-    if event.keycode == KEY_R:
-        # GAME CLEAR後だけは従来どおりラン全体を最初から開始する。
-        # 通常プレイ/ゲームオーバー中は現在階層のリスタート確認を開く。
-        if run_clear:
-            reset_run()
-            queue_redraw()
-        elif not stage_clear:
-            _open_restart_confirm()
+    if run_clear:
+        if event.keycode == KEY_Z:
+            _play_sfx(SFX_UI_MENU_DECIDE)
+            _return_to_title()
         return
 
-    if game_over or run_clear:
+    if game_over:
+        match event.keycode:
+            KEY_Z:
+                _play_sfx(SFX_UI_MENU_DECIDE)
+                _restart_current_stage_from_snapshot()
+            KEY_X:
+                _play_sfx(SFX_UI_MENU_DECIDE)
+                _return_to_title()
+        return
+
+    if event.keycode == KEY_R:
+        # 通常プレイ中だけ現在階層のリスタート確認を開く。GAME OVER後はZ RETRY / X TITLE。
+        if not stage_clear:
+            _open_restart_confirm()
         return
 
     if stage_clear:
@@ -1722,7 +1780,7 @@ func _confirm_arc() -> void:
         last_attack_cells.append(p)
         var idx := _enemy_index_at(p)
         if idx != -1:
-            _damage_enemy(idx, 2, [p])
+            _damage_enemy(idx, GameBalance.ARC_DAMAGE, [p])
             hit = true
             break
     if hit:
@@ -1731,7 +1789,7 @@ func _confirm_arc() -> void:
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "直線伝導が命中しました。2ダメージ。" if hit else "帯電した直線上に敵がいません。"
+    message = "直線伝導が命中しました。%dダメージ。" % GameBalance.ARC_DAMAGE if hit else "帯電した直線上に敵がいません。"
     _start_arc_fx(last_attack_cells)
 
 func _arc_path(d: Vector2i) -> Array[Vector2i]:
@@ -1768,7 +1826,7 @@ func _confirm_surge() -> void:
         var covered_cells: int = _enemy_covered_region_count(enemies[i], region)
         if covered_cells <= 0:
             continue
-        var damage: int = covered_cells
+        var damage: int = GameBalance.SURGE_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_region(enemies[i], region)
         _damage_enemy(i, damage, hit_cells)
         hit_count += 1
@@ -1833,8 +1891,8 @@ func _confirm_bomb() -> void:
         var covered_cells: int = _enemy_covered_cell_count(enemies[i], blast)
         if covered_cells <= 0:
             continue
-        # すべての敵で、爆発に入った占有マス数ぶん2ダメージが重なる。
-        var damage: int = 2 * covered_cells
+        # すべての敵で、爆発に入った占有マス数ぶんダメージが重なる。
+        var damage: int = GameBalance.BOMB_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], blast)
         _damage_enemy(i, damage, hit_cells)
         hit_count += 1
@@ -1886,7 +1944,7 @@ func _begin_dash() -> void:
     aim_dir = Vector2i.RIGHT
     dash_route_customized = false
     _rebuild_dash_preview()
-    message = "帯電路は角を自動で曲がります。分岐ではZで止まるか、方向キーで先へ進めます。"
+    message = "方向キーで最初の帯電マスを選択。帯電路は角を自動で曲がり、分岐では方向キーで先を選べます。"
 
 func _charged_dash_candidates(prev: Vector2i, cur: Vector2i, visited: Dictionary) -> Array[Vector2i]:
     var out: Array[Vector2i] = []
@@ -2002,7 +2060,7 @@ func _confirm_dash() -> void:
         var covered_cells: int = _enemy_covered_cell_count(enemies[i], path)
         if covered_cells <= 0:
             continue
-        var damage: int = covered_cells
+        var damage: int = GameBalance.DASH_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], path)
         _damage_enemy(i, damage, hit_cells)
         hit_count += 1
@@ -2094,7 +2152,7 @@ func _confirm_loop() -> void:
         active_hand_slot = -1
         loop_candidates.clear()
         loop_candidate_index = 0
-        message = "ループにはBATが%d必要です。" % cost
+        message = "ループ内爆破にはBATが%d必要です。" % cost
         return
 
     var inside: Array[Vector2i] = _selected_loop_inside_cells()
@@ -2127,7 +2185,7 @@ func _confirm_loop() -> void:
         var covered_cells: int = _enemy_covered_cell_count(enemies[i], attack_cells)
         if covered_cells <= 0:
             continue
-        var damage: int = 3 * covered_cells
+        var damage: int = GameBalance.LOOP_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], attack_cells)
         _damage_enemy(i, damage, hit_cells)
         hit_count += 1
@@ -2141,7 +2199,7 @@ func _confirm_loop() -> void:
     active_hand_slot = -1
     loop_candidates.clear()
     loop_candidate_index = 0
-    message = "ループ：%d体に合計%dダメージ。内側%dマスが帯電しました。" % [hit_count, total_damage, inside.size()]
+    message = "ループ内爆破：%d体に合計%dダメージ。内側%dマスが帯電しました。" % [hit_count, total_damage, inside.size()]
     _start_loop_fx(boundary, inside)
 
 func _loop_boundary_cells(inside: Array[Vector2i]) -> Array[Vector2i]:
@@ -2431,7 +2489,7 @@ func _finish_player_turn() -> void:
         active_hand_slot = -1
         _play_sfx(SFX_GAME_OVER_HP)
         _track_run_event("game_over")
-        message = "機体停止。Rでこの階層をやり直せます。"
+        message = ""
         return
 
     if _boss_all_legs_destroyed():
@@ -2475,7 +2533,7 @@ func _finish_player_turn() -> void:
         auto_pass_timer = 0.0
         _play_sfx(SFX_GAME_OVER_HP)
         _track_run_event("game_over")
-        message = "機体停止。Rでこの階層をやり直せます。"
+        message = ""
         return
 
     _schedule_auto_pass_if_needed()
@@ -2617,7 +2675,7 @@ func _draw_boss_action_fx() -> void:
             draw_line(spider_boss.break_fx_center + d * 10.0, spider_boss.break_fx_center + d * (20.0 + 34.0 * progress), Color(1.0, 0.82, 0.62, 0.75 * fade), 3.0)
         if spider_boss.break_destroyed_count > 0:
             var label := "LEG DESTROYED  %d / 4" % spider_boss.break_destroyed_count
-            var font: Font = ThemeDB.fallback_font
+            var font: Font = ui_font
             var size: int = 26
             var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
             var plate := Rect2(Vector2(GRID_ORIGIN.x + GRID_W * CELL * 0.5 - text_size.x * 0.5 - 18.0, 485.0), Vector2(text_size.x + 36.0, 44.0))

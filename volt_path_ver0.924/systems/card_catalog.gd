@@ -1,5 +1,7 @@
 extends RefCounted
 
+const GameBalance = preload("res://systems/game_balance.gd")
+
 # VOLT PATH card definitions.
 # Keep card identity, display text, cost, and hand-summary text in one place.
 
@@ -32,37 +34,37 @@ static func display_name(card_id: String) -> String:
         DASH:
             return "ラインダッシュ"
         LOOP:
-            return "ループ"
+            return "ループ内爆破"
     return "不明"
 
 static func cost(card_id: String) -> int:
     match card_id:
         ARC:
-            return 2
+            return GameBalance.ARC_COST
         SURGE:
-            return 4
+            return GameBalance.SURGE_COST
         BOMB:
-            return 7
+            return GameBalance.BOMB_COST
         WARP:
-            return 3
+            return GameBalance.WARP_COST
         DASH:
-            return 2
+            return GameBalance.DASH_COST
         LOOP:
-            return 4
+            return GameBalance.LOOP_COST
     return 99
 
 static func short_info(card_id: String) -> String:
     match card_id:
         ARC:
-            return "直線PATH  2DMG"
+            return "直線PATH  %dDMG" % GameBalance.ARC_DAMAGE
         SURGE:
-            return "接続PATH全体  1DMG/マス"
+            return "接続PATH全体  %dDMG/マス" % GameBalance.SURGE_DAMAGE_PER_CELL
         BOMB:
-            return "任意の帯電マス  3×3攻撃"
+            return "任意の帯電マス  3×3 / %dDMG/マス" % GameBalance.BOMB_DAMAGE_PER_CELL
         WARP:
             return "任意の帯電マスへ移動"
         DASH:
-            return "PATH走破  1DMG/マス"
+            return "PATH走破  %dDMG/マス" % GameBalance.DASH_DAMAGE_PER_CELL
         LOOP:
-            return "ループ内+輪  3DMG/マス"
+            return "ループ内+輪  %dDMG/マス" % GameBalance.LOOP_DAMAGE_PER_CELL
     return ""
