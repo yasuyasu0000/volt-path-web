@@ -1,7 +1,14 @@
+ver0.942
+- GA4の基本タグは0.941で正常動作したが、Godot側のカスタムイベントが送信されない問題を修正。
+- Head Includeにwindow.voltPathTrack(eventName, paramsJson)を定義し、gtag("event", ...)をブラウザ側の明示的な関数として実行する方式へ変更。
+- Godot側はJavaScriptBridge.get_interface("window")からvoltPathTrackを直接呼び出す。イベント送信ごとのJavaScriptBridge.eval()を廃止。
+- Godot→JavaScript間はevent名とJSON文字列という基本型だけを渡し、ブラウザ側でJSON.parseしてGA4へ送信する。
+- 送信時はブラウザConsoleへ [VOLT PATH GA4] ログを出すため、公開テスト時にgame_start / floor_clear / game_over / game_clearの発火を確認できる。
+
 ver0.941
-- GA4初期化方式を変更。Web Export presetの html/head_include にGoogle公式のgtag.jsスニペットを埋め込み、ページ読み込み時にGA4を初期化する。
-- systems/web_analytics.gd から動的script生成を削除し、JavaScriptBridgeは game_start / floor_clear / game_over / game_clear のゲームイベント送信専用にした。
-- Measurement IDはG-EFN2NDBE53のまま。デスクトップ版ではAnalytics送信を行わない。
+- GA4初期化をWeb Export presetのhtml/head_includeへ移し、Google公式gtag.jsをページ読み込み時に直接ロードする方式へ変更。
+- systems/web_analytics.gdはゲームイベント送信を担当し、game_start / floor_clear / game_over / game_clearを送る構成を維持。
+- Measurement IDはG-EFN2NDBE53。Web Export後のindex.htmlにGoogleタグが入ったかWorkflowで検査する。
 
 ver0.940
 - 公開テスト用Google Analytics 4を有効化。Measurement ID G-EFN2NDBE53 をproject.godotへ設定。

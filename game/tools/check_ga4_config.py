@@ -9,6 +9,8 @@ required = [
     f'window.__voltPathGa4Id = \\"{MEASUREMENT_ID}\\"',
     'window.gtag = gtag',
     'gtag(\\"config\\", window.__voltPathGa4Id)',
+    'window.voltPathTrack = function(eventName, paramsJson)',
+    'window.gtag(\\"event\\", String(eventName), params)',
 ]
 missing = [item for item in required if item not in text]
 if missing:
@@ -16,4 +18,4 @@ if missing:
     for item in missing:
         print(" - missing:", item)
     sys.exit(1)
-print(f"GA4 Head Include OK: {MEASUREMENT_ID}")
+print(f"GA4 Head Include + custom event bridge OK: {MEASUREMENT_ID}")
