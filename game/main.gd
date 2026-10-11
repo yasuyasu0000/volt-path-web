@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.949
+# VOLT PATH ver0.960
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -251,6 +251,9 @@ var last_attack_cells: Array[Vector2i] = []
 var enemy_hit_flashes: Array[Dictionary] = []
 var enemy_damage_numbers: Array[Dictionary] = []
 var enemy_destroy_fx: Array[Dictionary] = []
+var pending_enemy_hit_visuals: Array[Dictionary] = []
+var enemy_hit_event_sequence := 0
+var pending_enemy_hit_sfx_time := -1.0
 var enemy_impact_shake_time := 0.0
 var enemy_impact_shake_strength := 0.0
 var enemy_impact_shake_sequence := 0
@@ -353,6 +356,9 @@ func reset_run() -> void:
     enemy_hit_flashes.clear()
     enemy_damage_numbers.clear()
     enemy_destroy_fx.clear()
+    pending_enemy_hit_visuals.clear()
+    enemy_hit_event_sequence = 0
+    pending_enemy_hit_sfx_time = -1.0
     enemy_impact_shake_time = 0.0
     enemy_impact_shake_strength = 0.0
     enemy_impact_shake_sequence = 0
@@ -429,6 +435,15 @@ func _process(delta: float) -> void:
         if bool(skill_fx.process(delta)):
             skill_fx_finished = true
         redraw_priority = 2
+
+    # 被ダメージ演出/ヒット音の予約時計はSkill FXと同じdeltaで進める。
+    # ヒットストップ中はすべて停止するため、到達フレームの同期が崩れない。
+    if not enemy_hitstop_active and _process_pending_enemy_hit_sfx(delta):
+        redraw_priority = 2
+    if not enemy_hitstop_active and _process_pending_enemy_hit_visuals(delta):
+        redraw_priority = 2
+        # 予約命中が6DMG以上なら、このフレームから後続演出を止める。
+        enemy_hitstop_active = enemy_impact_freeze_time > 0.0
 
     if card_replace_anim_active and not enemy_hitstop_active:
         card_replace_anim_time += delta
@@ -718,6 +733,9 @@ func _restart_current_stage_from_snapshot(reason: String = "reset") -> void:
     enemy_hit_flashes.clear()
     enemy_damage_numbers.clear()
     enemy_destroy_fx.clear()
+    pending_enemy_hit_visuals.clear()
+    enemy_hit_event_sequence = 0
+    pending_enemy_hit_sfx_time = -1.0
     enemy_impact_shake_time = 0.0
     enemy_impact_shake_strength = 0.0
     enemy_impact_freeze_time = 0.0
@@ -1519,7 +1537,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.949", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.959", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -1756,10 +1774,10 @@ func _start_arc_fx(path: Array[Vector2i]) -> void:
     skill_fx.start_arc(path, player_pos)
     last_attack_cells.clear()
 
-func _start_surge_fx(region: Dictionary) -> void:
+func _start_surge_fx(region: Dictionary, hit_cells: Array[Vector2i]) -> void:
     skill_turn_pending = true
     skill_fx_finished = false
-    skill_fx.start_surge(region, player_pos)
+    skill_fx.start_surge(region, hit_cells, player_pos)
     last_attack_cells.clear()
 
 func _start_bomb_fx(blast: Array[Vector2i], origin: Vector2i) -> void:
@@ -1806,33 +1824,40 @@ func _confirm_arc() -> void:
         return
     _spend_bat(cost)
     _play_sfx(SFX_CARD_ARC)
-    last_attack_cells.clear()
     var path := _arc_path(aim_dir)
-    var hit := false
-    for p in path:
-        last_attack_cells.append(p)
-        var idx := _enemy_index_at(p)
-        if idx != -1:
-            _damage_enemy(idx, GameBalance.ARC_DAMAGE, [p])
-            hit = true
-            break
-    if hit:
-        _play_sfx(SFX_ENEMY_HIT)
-    _remove_dead_enemies()
+    last_attack_cells.assign(path)
+
+    var hit_count: int = 0
+    var total_damage: int = 0
+    var earliest_hit_delay := 999.0
+    for i in range(enemies.size()):
+        var covered_cells: int = _enemy_covered_cell_count(enemies[i], path)
+        if covered_cells <= 0:
+            continue
+        # 選択方向の連続帯電PATH上にある占有マスすべてへダメージ判定。
+        # 大型敵が複数マス重なれば、そのマス数ぶんダメージが重なる。
+        var damage: int = GameBalance.ARC_DAMAGE * covered_cells
+        var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], path)
+        var visual_delay: float = skill_fx.arc_hit_delay(path, hit_cells)
+        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
+        _damage_enemy(i, damage, hit_cells, visual_delay)
+        hit_count += 1
+        total_damage += damage
+    if hit_count > 0:
+        _queue_enemy_hit_sfx(earliest_hit_delay)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "直線伝導が命中しました。%dダメージ。" % GameBalance.ARC_DAMAGE if hit else "帯電した直線上に敵がいません。"
+    message = "ストレートボルト：%d体に合計%dダメージ。" % [hit_count, total_damage] if hit_count > 0 else "帯電した直線上に敵がいません。"
     _start_arc_fx(last_attack_cells)
 
 func _arc_path(d: Vector2i) -> Array[Vector2i]:
     var out: Array[Vector2i] = []
     var p: Vector2i = player_pos + d
-    var steps := 0
-    while steps < 7 and _is_floor(p) and charged.has(p):
+    # 選択した上下左右1方向へ、途切れるまで連続した帯電マスをすべて対象にする。
+    while _is_floor(p) and charged.has(p):
         out.append(p)
         p += d
-        steps += 1
     return out
 
 func _begin_surge() -> void:
@@ -1844,7 +1869,7 @@ func _confirm_surge() -> void:
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "一斉放電にはBATが%d必要です。" % cost
+        message = "フロアライトニングにはBATが%d必要です。" % cost
         return
     _spend_bat(cost)
     _play_sfx(SFX_CARD_SURGE)
@@ -1852,6 +1877,8 @@ func _confirm_surge() -> void:
     var region := _connected_charged_region(player_pos)
     var hit_count := 0
     var total_damage := 0
+    var earliest_hit_delay := 999.0
+    var surge_hit_cells: Array[Vector2i] = []
     for key in region.keys():
         var p: Vector2i = Vector2i(key)
         last_attack_cells.append(p)
@@ -1861,17 +1888,21 @@ func _confirm_surge() -> void:
             continue
         var damage: int = GameBalance.SURGE_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_region(enemies[i], region)
-        _damage_enemy(i, damage, hit_cells)
+        for hit_cell in hit_cells:
+            if hit_cell not in surge_hit_cells:
+                surge_hit_cells.append(hit_cell)
+        var visual_delay: float = skill_fx.surge_hit_delay(surge_hit_cells, hit_cells)
+        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
+        _damage_enemy(i, damage, hit_cells, visual_delay)
         hit_count += 1
         total_damage += damage
     if hit_count > 0:
-        _play_sfx(SFX_ENEMY_HIT)
-    _remove_dead_enemies()
+        _queue_enemy_hit_sfx(earliest_hit_delay)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "一斉放電：%d体に合計%dダメージ。" % [hit_count, total_damage]
-    _start_surge_fx(region)
+    message = "フロアライトニング：%d体に合計%dダメージ。" % [hit_count, total_damage]
+    _start_surge_fx(region, surge_hit_cells)
 
 func _connected_charged_region(start: Vector2i) -> Dictionary:
     var seen: Dictionary = {}
@@ -1897,7 +1928,7 @@ func _begin_bomb() -> void:
 func _confirm_bomb() -> void:
     var cost := _card_cost(CARD_BOMB)
     if not _is_floor(bomb_cursor) or not charged.has(bomb_cursor):
-        message = "爆弾は帯電マスを爆心にしてください。"
+        message = "サンダーボムは帯電マスを爆心にしてください。"
         return
     if bat < cost:
         aim_mode = ""
@@ -1920,6 +1951,7 @@ func _confirm_bomb() -> void:
 
     var hit_count: int = 0
     var total_damage: int = 0
+    var earliest_hit_delay := 999.0
     for i in range(enemies.size()):
         var covered_cells: int = _enemy_covered_cell_count(enemies[i], blast)
         if covered_cells <= 0:
@@ -1927,16 +1959,17 @@ func _confirm_bomb() -> void:
         # すべての敵で、爆発に入った占有マス数ぶんダメージが重なる。
         var damage: int = GameBalance.BOMB_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], blast)
-        _damage_enemy(i, damage, hit_cells)
+        var visual_delay: float = skill_fx.bomb_hit_delay(blast, hit_cells)
+        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
+        _damage_enemy(i, damage, hit_cells, visual_delay)
         hit_count += 1
         total_damage += damage
     if hit_count > 0:
-        _play_sfx(SFX_ENEMY_HIT)
-    _remove_dead_enemies()
+        _queue_enemy_hit_sfx(earliest_hit_delay)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "爆弾：%d体に合計%dダメージ。" % [hit_count, total_damage]
+    message = "サンダーボム：%d体に合計%dダメージ。" % [hit_count, total_damage]
     _start_bomb_fx(blast, bomb_cursor)
 
 func _begin_warp() -> void:
@@ -1979,7 +2012,7 @@ func _begin_dash() -> void:
     dash_branch_options.clear()
     dash_branch_origin = player_pos
     dash_route_customized = false
-    message = "ラインダッシュ：方向キーで1マスずつ選択。直前のマスへ戻ると1マス取消。Zで発動 / Xでキャンセル。"
+    message = ""
 
 func _handle_dash_direction_input(d: Vector2i) -> void:
     # ver0.948: 方向キー1入力につき経路を1マス追加する。
@@ -2001,9 +2034,9 @@ func _handle_dash_direction_input(d: Vector2i) -> void:
             dash_branch_options.clear()
             dash_route_customized = not dash_path_preview.is_empty()
             if dash_path_preview.is_empty():
-                message = "ラインダッシュ：経路を開始地点まで戻しました。方向キーで1マス選択。"
+                message = "経路：開始地点"
             else:
-                message = "ラインダッシュ：1マス戻しました。経路 %dマス。" % dash_path_preview.size()
+                message = "経路：%dマス" % dash_path_preview.size()
             return
 
     if not _is_floor(next) or not charged.has(next):
@@ -2018,7 +2051,7 @@ func _handle_dash_direction_input(d: Vector2i) -> void:
     dash_branch_options.clear()
     dash_route_customized = true
     aim_dir = d
-    message = "ラインダッシュ：経路 %dマス。方向キーで1マス追加 / 直前へ戻って取消 / Zで発動。" % dash_path_preview.size()
+    message = "経路：%dマス" % dash_path_preview.size()
 
 func _confirm_dash() -> void:
     # 方向キーで1マスずつ積み上げた現在のプレビュー経路を、そのまま発動する。
@@ -2085,9 +2118,9 @@ func _confirm_dash() -> void:
     dash_branch_options.clear()
     dash_route_customized = false
     if hit_count > 0:
-        message = "ラインダッシュ：%d体を貫通し、合計%dダメージ。" % [hit_count, total_damage]
+        message = "チェインダッシュ：%d体を貫通し、合計%dダメージ。" % [hit_count, total_damage]
     else:
-        message = "ラインダッシュ：帯電路を%dマス走り抜けました。" % path.size()
+        message = "チェインダッシュ：帯電路を%dマス走り抜けました。" % path.size()
     if overload_damage > 0:
         message += "  全面帯電：HP -%d" % overload_damage
     _start_dash_fx(dash_origin, path, destination)
@@ -2142,7 +2175,7 @@ func _confirm_loop() -> void:
         active_hand_slot = -1
         loop_candidates.clear()
         loop_candidate_index = 0
-        message = "ループ内爆破にはBATが%d必要です。" % cost
+        message = "サーキットブレイクにはBATが%d必要です。" % cost
         return
 
     var inside: Array[Vector2i] = _selected_loop_inside_cells()
@@ -2171,25 +2204,27 @@ func _confirm_loop() -> void:
 
     var hit_count: int = 0
     var total_damage: int = 0
+    var earliest_hit_delay := 999.0
     for i in range(enemies.size()):
         var covered_cells: int = _enemy_covered_cell_count(enemies[i], attack_cells)
         if covered_cells <= 0:
             continue
         var damage: int = GameBalance.LOOP_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], attack_cells)
-        _damage_enemy(i, damage, hit_cells)
+        var visual_delay: float = skill_fx.loop_hit_delay()
+        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
+        _damage_enemy(i, damage, hit_cells, visual_delay)
         hit_count += 1
         total_damage += damage
 
     if hit_count > 0:
-        _play_sfx(SFX_ENEMY_HIT)
-    _remove_dead_enemies()
+        _queue_enemy_hit_sfx(earliest_hit_delay)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
     loop_candidates.clear()
     loop_candidate_index = 0
-    message = "ループ内爆破：%d体に合計%dダメージ。内側%dマスが帯電しました。" % [hit_count, total_damage, inside.size()]
+    message = "サーキットブレイク：%d体に合計%dダメージ。内側%dマスが帯電しました。" % [hit_count, total_damage, inside.size()]
     _start_loop_fx(boundary, inside)
 
 func _loop_boundary_cells(inside: Array[Vector2i]) -> Array[Vector2i]:
@@ -2828,7 +2863,7 @@ func _enemy_hit_tier(amount: int) -> int:
         return 2
     return 1
 
-func _damage_enemy(index: int, amount: int, impacted_cells: Array[Vector2i] = []) -> void:
+func _damage_enemy(index: int, amount: int, impacted_cells: Array[Vector2i] = [], visual_delay: float = 0.0) -> void:
     if index < 0 or index >= enemies.size() or amount <= 0:
         return
     var enemy_before: Dictionary = enemies[index]
@@ -2846,17 +2881,68 @@ func _damage_enemy(index: int, amount: int, impacted_cells: Array[Vector2i] = []
     var reaction_duration: float = 0.14 if tier == 1 else (0.18 if tier == 2 else 0.22)
     var local_strength: float = 0.82 if tier == 1 else (1.18 if tier == 2 else 1.55)
 
-    enemies[index]["hp"] = int(enemies[index]["hp"]) - amount
-    enemies[index]["hit_fx_time"] = reaction_duration
-    enemies[index]["hit_fx_duration"] = reaction_duration
-    enemies[index]["hit_fx_sequence"] = int(enemies[index].get("hit_fx_sequence", 0)) + 1
-    enemies[index]["hit_fx_strength"] = local_strength
+    # HPなどのゲームロジックはカード確定時に即時反映する。
+    # 見た目だけを実際の電撃到達フレームまで予約し、ターン結果は変えない。
+    var hp_before: int = int(enemies[index]["hp"])
+    enemies[index]["hp"] = hp_before - amount
+    if visual_delay > 0.0:
+        # 命中前にHP表示だけ先に減るのも避ける。描画専用の旧HPを命中まで保持する。
+        enemies[index]["_visual_hp_override"] = hp_before
+    enemy_hit_event_sequence += 1
+    var event_id: int = enemy_hit_event_sequence
+    enemies[index]["_hit_visual_event_id"] = event_id
+    var event := {
+        "event_id": event_id,
+        "cells": hit_cells,
+        "center": hit_center,
+        "amount": amount,
+        "tier": tier,
+        "reaction_duration": reaction_duration,
+        "strength": local_strength,
+        "enemy_type": str(enemy_before.get("type", "")),
+        "destroyed": int(enemies[index]["hp"]) <= 0,
+        "remove_on_emit": visual_delay > 0.0,
+        "time_left": maxf(0.0, visual_delay),
+    }
+
+    if visual_delay <= 0.0:
+        _emit_enemy_hit_visual(event)
+    else:
+        pending_enemy_hit_visuals.append(event)
+
+func _enemy_index_for_hit_event(event_id: int) -> int:
+    if event_id <= 0:
+        return -1
+    for i in range(enemies.size()):
+        if int(enemies[i].get("_hit_visual_event_id", -1)) == event_id:
+            return i
+    return -1
+
+func _emit_enemy_hit_visual(event: Dictionary) -> void:
+    var event_id: int = int(event.get("event_id", -1))
+    var index: int = _enemy_index_for_hit_event(event_id)
+    var hit_cells: Array[Vector2i] = []
+    for p in event.get("cells", []):
+        hit_cells.append(Vector2i(p))
+    var hit_center: Vector2 = Vector2(event.get("center", Vector2.ZERO))
+    var amount: int = int(event.get("amount", 0))
+    var tier: int = int(event.get("tier", 1))
+    var reaction_duration: float = float(event.get("reaction_duration", ENEMY_HIT_REACTION_DURATION))
+    var local_strength: float = float(event.get("strength", 1.0))
+
+    if index >= 0:
+        enemies[index].erase("_visual_hp_override")
+        enemies[index]["hit_fx_time"] = reaction_duration
+        enemies[index]["hit_fx_duration"] = reaction_duration
+        enemies[index]["hit_fx_sequence"] = event_id
+        enemies[index]["hit_fx_strength"] = local_strength
+
     enemy_hit_flashes.append({
         "cells": hit_cells,
         "time": reaction_duration,
         "duration": reaction_duration,
         "tier": tier,
-        "sequence": int(enemies[index].get("hit_fx_sequence", 0)),
+        "sequence": event_id,
     })
     enemy_damage_numbers.append({
         "center": hit_center,
@@ -2866,7 +2952,7 @@ func _damage_enemy(index: int, amount: int, impacted_cells: Array[Vector2i] = []
         "duration": ENEMY_DAMAGE_NUMBER_DURATION,
     })
 
-    # 中ダメージ以上は盤面全体にも短い衝撃を返す。6DMG以上だけ0.06秒停止する。
+    # 中ダメージ以上の盤面揺れと6DMG以上のヒットストップも命中瞬間から開始する。
     if tier >= 2:
         enemy_impact_shake_time = ENEMY_IMPACT_SHAKE_DURATION
         enemy_impact_shake_strength = maxf(enemy_impact_shake_strength, 0.55 if tier == 2 else 1.0)
@@ -2874,16 +2960,68 @@ func _damage_enemy(index: int, amount: int, impacted_cells: Array[Vector2i] = []
     if tier >= 3:
         enemy_impact_freeze_time = maxf(enemy_impact_freeze_time, ENEMY_IMPACT_FREEZE_DURATION)
 
-    # 通常敵は直後に配列から消えるため、撃破位置を独立した短命FXへ退避する。
-    # ボス脚は既存の専用破壊演出を使うので重ねない。
-    if int(enemies[index]["hp"]) <= 0 and str(enemy_before.get("type", "")) != "boss_leg":
+    if bool(event.get("destroyed", false)) and str(event.get("enemy_type", "")) != "boss_leg":
         enemy_destroy_fx.append({
             "cells": hit_cells,
             "center": hit_center,
             "time": ENEMY_DESTROY_FX_DURATION,
             "duration": ENEMY_DESTROY_FX_DURATION,
-            "sequence": int(enemies[index].get("hit_fx_sequence", 0)),
+            "sequence": event_id,
         })
+
+    # 遅延命中で倒れた敵は、ここで初めて盤面上から取り除く。
+    # 生存敵は内部用event idだけ消して通常の被弾揺れを続ける。
+    if index >= 0:
+        if bool(event.get("destroyed", false)) and bool(event.get("remove_on_emit", false)):
+            _remove_enemy_for_hit_event(index)
+        elif not bool(event.get("destroyed", false)):
+            enemies[index].erase("_hit_visual_event_id")
+
+func _remove_enemy_for_hit_event(index: int) -> void:
+    if index < 0 or index >= enemies.size() or int(enemies[index].get("hp", 1)) > 0:
+        return
+    if str(enemies[index].get("type", "")) == "boss_leg":
+        if spider_boss != null and bool(spider_boss.mark_leg_destroyed(enemies, index, Callable(self, "_cell_center"))):
+            _play_sfx(SFX_BOSS_LEG_BREAK)
+        return
+    enemies.remove_at(index)
+    _play_sfx(SFX_ENEMY_DESTROY)
+
+func _queue_enemy_hit_sfx(delay: float) -> void:
+    if delay <= 0.0:
+        _play_sfx(SFX_ENEMY_HIT)
+        pending_enemy_hit_sfx_time = -1.0
+        return
+    if pending_enemy_hit_sfx_time < 0.0 or delay < pending_enemy_hit_sfx_time:
+        pending_enemy_hit_sfx_time = delay
+
+func _process_pending_enemy_hit_sfx(delta: float) -> bool:
+    if pending_enemy_hit_sfx_time < 0.0:
+        return false
+    pending_enemy_hit_sfx_time = maxf(0.0, pending_enemy_hit_sfx_time - delta)
+    if pending_enemy_hit_sfx_time > 0.0:
+        return true
+    pending_enemy_hit_sfx_time = -1.0
+    _play_sfx(SFX_ENEMY_HIT)
+    return true
+
+func _process_pending_enemy_hit_visuals(delta: float) -> bool:
+    if pending_enemy_hit_visuals.is_empty():
+        return false
+    var active := false
+    # skill_fxと同じdeltaで進め、ヒットストップ中はこの関数自体を呼ばない。
+    # そのため電撃と被弾予約の時計が常に同じだけ進む。
+    for i in range(pending_enemy_hit_visuals.size() - 1, -1, -1):
+        var event: Dictionary = pending_enemy_hit_visuals[i]
+        var time_left: float = maxf(0.0, float(event.get("time_left", 0.0)) - delta)
+        if time_left > 0.0:
+            pending_enemy_hit_visuals[i]["time_left"] = time_left
+            active = true
+            continue
+        pending_enemy_hit_visuals.remove_at(i)
+        _emit_enemy_hit_visual(event)
+        active = true
+    return active
 
 func _process_enemy_hit_reactions(delta: float) -> bool:
     var active := false
@@ -2947,6 +3085,11 @@ func _enemy_impact_shake_offset() -> Vector2:
     var phase: float = progress * 38.0 + float(enemy_impact_shake_sequence) * 1.47
     var amplitude: float = 4.0 * enemy_impact_shake_strength * remain * remain
     return Vector2(sin(phase) * amplitude, cos(phase * 1.29) * amplitude * 0.62)
+
+func _skill_fx_shake_offset() -> Vector2:
+    if skill_fx == null:
+        return Vector2.ZERO
+    return skill_fx.screen_shake_offset()
 
 func _enemy_bounds_rect(enemy: Dictionary) -> Rect2:
     return enemy_geometry.enemy_bounds_rect(enemy)
@@ -3083,7 +3226,7 @@ func _draw() -> void:
         _draw_title_screen()
         return
 
-    draw_set_transform(_damage_feedback_shake_offset() + _boss_shake_offset() + _enemy_impact_shake_offset())
+    draw_set_transform(_damage_feedback_shake_offset() + _boss_shake_offset() + _enemy_impact_shake_offset() + _skill_fx_shake_offset())
 
     hud_renderer.draw_side_panels()
     board_renderer.draw_board()

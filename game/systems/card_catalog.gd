@@ -24,17 +24,17 @@ const POOL: Array[String] = [
 static func display_name(card_id: String) -> String:
     match card_id:
         ARC:
-            return "直線伝導"
+            return "ストレートボルト"
         SURGE:
-            return "一斉放電"
+            return "フロアライトニング"
         BOMB:
-            return "爆弾"
+            return "サンダーボム"
         WARP:
-            return "ワープ"
+            return "ボルトワープ"
         DASH:
-            return "ラインダッシュ"
+            return "チェインダッシュ"
         LOOP:
-            return "ループ内爆破"
+            return "サーキットブレイク"
     return "不明"
 
 static func cost(card_id: String) -> int:
@@ -56,7 +56,7 @@ static func cost(card_id: String) -> int:
 static func short_info(card_id: String) -> String:
     match card_id:
         ARC:
-            return "直線PATH  %dDMG" % GameBalance.ARC_DAMAGE
+            return "直線PATH全体  %dDMG/マス" % GameBalance.ARC_DAMAGE
         SURGE:
             return "接続PATH全体  %dDMG/マス" % GameBalance.SURGE_DAMAGE_PER_CELL
         BOMB:

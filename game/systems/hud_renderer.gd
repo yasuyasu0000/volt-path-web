@@ -109,12 +109,19 @@ func _draw_hud() -> void:
     if h.aim_mode != "" and not h.game_over and not h.run_clear and not h.stage_clear:
         _draw_context_action_guide()
 
-    # メッセージは重要な結果・エラーだけ。文字を大きくし、1〜2行で読ませる。
-    if h.message != "":
+    # 通常時は結果・エラーを表示。スキル選択中は同じメッセージ欄を
+    # 2行の効果説明として使い、必要な選択状況/エラーだけ3行目へ添える。
+    var aim_description: String = _aim_skill_description()
+    if aim_description != "" or h.message != "":
         var message_box := Rect2(Vector2(323, 532), Vector2(674, 96))
         h.draw_rect(message_box, h.C_PANEL)
         h.draw_rect(message_box, h.C_FLOOR_EDGE, false, 1.0)
-        h.draw_multiline_string(font, Vector2(341, 566), h.message, HORIZONTAL_ALIGNMENT_LEFT, 638, 21, 19, h.C_TEXT)
+        if aim_description != "":
+            h.draw_multiline_string(font, Vector2(341, 558), aim_description, HORIZONTAL_ALIGNMENT_LEFT, 638, 20, 18, h.C_TEXT)
+            if h.message != "":
+                h.draw_string(font, Vector2(341, 617), h.message, HORIZONTAL_ALIGNMENT_LEFT, 638, 14, h.C_DIM)
+        else:
+            h.draw_multiline_string(font, Vector2(341, 566), h.message, HORIZONTAL_ALIGNMENT_LEFT, 638, 21, 19, h.C_TEXT)
 
     if h.stage_clear:
         h.draw_rect(Rect2(Vector2(437, 205), Vector2(446, 142)), Color(0, 0, 0, 0.88))
@@ -209,6 +216,22 @@ func _draw_restart_choice(rect: Rect2, label: String, selected: bool) -> void:
     h.draw_rect(rect, fill)
     h.draw_rect(rect, edge, false, 2.0 if selected else 1.0)
     h.draw_string(font, rect.position + Vector2(0, 38), label, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 21, h.C_TEXT if selected else h.C_DIM)
+
+func _aim_skill_description() -> String:
+    match h.aim_mode:
+        CARD_ARC:
+            return "選んだ方向の連続した帯電マスすべてを攻撃\n敵1マスにつき2ダメージ"
+        CARD_SURGE:
+            return "帯電した床にいる敵を一斉に攻撃\n敵1マスにつき1ダメージ"
+        CARD_BOMB:
+            return "選んだ帯電マスを中心に3×3を爆破\n敵1マスにつき2ダメージ"
+        CARD_WARP:
+            return "好きな帯電マスを選択\nそのマスへワープする"
+        CARD_DASH:
+            return "帯電した床を1マスずつ選んで経路を作る\n通過した敵1マスにつき1ダメージ"
+        CARD_LOOP:
+            return "帯電した床で囲んだ範囲を爆破\n敵1マスにつき3ダメージ"
+    return ""
 
 func _context_action_guide_text() -> String:
     match h.aim_mode:

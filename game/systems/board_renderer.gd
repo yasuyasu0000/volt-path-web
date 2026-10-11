@@ -101,7 +101,7 @@ func draw_last_attack_cells() -> void:
 
 func draw_aim_overlay() -> void:
     if h.aim_mode == h.CARD_ARC:
-        # 直線伝導は隣接1マスだけでなく、実際に電流が届く帯電PATH全体を予告する。
+        # 直線伝導は選択方向で連続している帯電PATH全体を予告する。
         _draw_direction_indicator_from_cell(h.player_pos, h.aim_dir, Color("#ffe95c"), false)
         for p in h._arc_path(h.aim_dir):
             h.draw_rect(h._cell_rect(p).grow(-3.0), h.C_ARC)
@@ -493,7 +493,8 @@ func draw_enemy_hp_labels() -> void:
     # 盤面の移動先・帯電状態を隠さないことを優先し、背景プレートも使わない。
     var base_offset: Vector2 = h._damage_feedback_shake_offset() + h._boss_shake_offset() + h._enemy_impact_shake_offset()
     for enemy in h.enemies:
-        if maxi(0, int(enemy.get("hp", 0))) <= 0:
+        var display_hp: int = maxi(0, int(enemy.get("_visual_hp_override", enemy.get("hp", 0))))
+        if display_hp <= 0:
             continue
         h.draw_set_transform(base_offset + h._enemy_hit_reaction_offset(enemy))
         _draw_enemy_hp_number_inside(enemy)
@@ -530,7 +531,7 @@ func _enemy_hp_anchor(enemy: Dictionary) -> Vector2:
     return anchor
 
 func _draw_enemy_hp_number_inside(enemy: Dictionary) -> void:
-    var current_hp: int = maxi(0, int(enemy.get("hp", 0)))
+    var current_hp: int = maxi(0, int(enemy.get("_visual_hp_override", enemy.get("hp", 0))))
     if current_hp <= 0:
         return
 
