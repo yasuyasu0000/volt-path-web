@@ -17,6 +17,7 @@ func setup() -> void:
     _register(&"step_charged", preload("res://sfx/step_charged.wav"), -18.0)
     _register(&"player_hurt", preload("res://sfx/player_hurt.wav"), -3.0)
     _register(&"enemy_hit", preload("res://sfx/enemy_hit.wav"), -10.0)
+    _register(&"enemy_heavy_hit", preload("res://sfx/enemy_heavy_hit.wav"), -4.5)
     _register(&"enemy_destroy", preload("res://sfx/enemy_destroy.wav"), -6.0)
     _register(&"card_arc", preload("res://sfx/card_arc.wav"), -1.0)
     _register(&"card_surge", preload("res://sfx/card_surge.wav"), -6.0)

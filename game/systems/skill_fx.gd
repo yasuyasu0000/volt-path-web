@@ -4,7 +4,7 @@ const CardCatalog = preload("res://systems/card_catalog.gd")
 
 const ARC_DURATION := 0.22
 const SURGE_DURATION := 0.34
-const BOMB_DURATION := 0.42
+const BOMB_DURATION := 0.36
 const WARP_DURATION := 0.30
 const DASH_MIN_DURATION := 0.22
 const DASH_MAX_DURATION := 0.52
@@ -27,6 +27,7 @@ var time := 0.0
 var cells: Array[Vector2i] = []
 var secondary_cells: Array[Vector2i] = []
 var distances: Dictionary = {}
+var parents: Dictionary = {}
 var max_distance := 0
 var origin := Vector2i.ZERO
 var target := Vector2i.ZERO
@@ -38,6 +39,7 @@ func reset() -> void:
     cells.clear()
     secondary_cells.clear()
     distances.clear()
+    parents.clear()
     max_distance = 0
     origin = Vector2i.ZERO
     target = Vector2i.ZERO
@@ -83,28 +85,40 @@ func arc_hit_delay(path: Array[Vector2i], impacted_cells: Array[Vector2i]) -> fl
         return 0.0
     return ARC_DURATION * 0.70 * float(first_index + 1) / float(path.size())
 
-func surge_hit_delay(all_hit_cells: Array[Vector2i], impacted_cells: Array[Vector2i]) -> float:
-    if all_hit_cells.is_empty() or impacted_cells.is_empty():
+func surge_hit_delay(impacted_cells: Array[Vector2i]) -> float:
+    if impacted_cells.is_empty() or distances.is_empty():
         return 0.0
+    var travel_start := 0.08
+    var travel_span := 0.58
     var earliest := INF
     for cell in impacted_cells:
-        var index := all_hit_cells.find(cell)
-        if index < 0:
+        if not distances.has(cell):
             continue
-        var progress_delay: float = 0.18 + float(index % 4) * 0.065
+        var distance: int = int(distances[cell])
+        var distance_ratio: float = float(distance) / float(maxi(1, max_distance))
+        var progress_delay: float = travel_start + travel_span * distance_ratio
         earliest = minf(earliest, SURGE_DURATION * progress_delay)
     return 0.0 if is_inf(earliest) else earliest
 
-func bomb_hit_delay(blast: Array[Vector2i], impacted_cells: Array[Vector2i]) -> float:
+func _bomb_arrival_progress(cell: Vector2i, bomb_origin: Vector2i) -> float:
+    # 中心を起点に、上下左右、その少し後に斜めへ電流が届く。
+    # 3x3の端が床外で欠けても、位置関係だけで同じタイミングを返せる。
+    var offset: Vector2i = cell - bomb_origin
+    var manhattan: int = absi(offset.x) + absi(offset.y)
+    if manhattan <= 0:
+        return 0.12
+    if manhattan == 1:
+        return 0.22
+    return 0.29
+
+func bomb_hit_delay(blast: Array[Vector2i], impacted_cells: Array[Vector2i], bomb_origin: Vector2i) -> float:
     if blast.is_empty() or impacted_cells.is_empty():
         return 0.0
     var earliest := INF
     for cell in impacted_cells:
-        var index := blast.find(cell)
-        if index < 0:
+        if not blast.has(cell):
             continue
-        var progress_delay: float = 0.30 + float(index % 4) * 0.018
-        earliest = minf(earliest, BOMB_DURATION * progress_delay)
+        earliest = minf(earliest, BOMB_DURATION * _bomb_arrival_progress(cell, bomb_origin))
     return 0.0 if is_inf(earliest) else earliest
 
 func loop_hit_delay() -> float:
@@ -115,14 +129,14 @@ func screen_shake_offset() -> Vector2:
     if not active or kind != CardCatalog.BOMB or BOMB_DURATION <= 0.0:
         return Vector2.ZERO
     var progress: float = clamp(time / BOMB_DURATION, 0.0, 1.0)
-    # サンダーボムの破裂瞬間だけ最大約2px揺らす。外周UIはmain側で揺れ対象外。
-    if progress < 0.31 or progress > 0.53:
+    # 各セル枠そのものが震えるのが主役。盤面全体は最後の一斉ブレイクだけ軽く揺らす。
+    if progress < 0.56 or progress > 0.72:
         return Vector2.ZERO
-    var local_t: float = clamp((progress - 0.31) / 0.22, 0.0, 1.0)
-    var envelope: float = 1.0 - local_t
-    var amplitude: float = 2.0 * envelope * envelope
-    var phase: float = local_t * 38.0
-    return Vector2(sin(phase) * amplitude, cos(phase * 1.27) * amplitude * 0.68)
+    var local_t: float = clamp((progress - 0.56) / 0.16, 0.0, 1.0)
+    var envelope: float = sin(local_t * PI)
+    var amplitude: float = 1.45 * envelope
+    var phase: float = local_t * 46.0
+    return Vector2(sin(phase) * amplitude, cos(phase * 1.31) * amplitude * 0.72)
 
 func start_arc(path: Array[Vector2i], start_origin: Vector2i) -> void:
     reset()
@@ -137,12 +151,32 @@ func start_surge(region: Dictionary, hit_cells: Array[Vector2i], start_origin: V
     active = true
     kind = CardCatalog.SURGE
     origin = start_origin
-    # FLOOR LIGHTNINGは、実際に効果が及ぶ接続帯電領域そのものを一度脈動させる。
-    # その後、敵が占有している命中セルだけで個別放電を起こす。
-    # 毎フレームの領域探索はせず、発動時に確定したセルだけを保持する。
-    for key in region.keys():
-        cells.append(Vector2i(key))
     secondary_cells = hit_cells.duplicate()
+
+    # FLOOR LIGHTNINGは主人公を起点に、接続帯電PATHへ電流を流し込む。
+    # 発動時に一度だけBFSし、各セルの主人公からの距離と分岐元を保存する。
+    # draw中はこの結果を読むだけなので、毎フレーム経路探索は行わない。
+    if region.is_empty() or not region.has(start_origin):
+        return
+    var dirs: Array[Vector2i] = [Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT]
+    var frontier: Array[Vector2i] = [start_origin]
+    distances[start_origin] = 0
+    cells.append(start_origin)
+    var read_index := 0
+    while read_index < frontier.size():
+        var current: Vector2i = frontier[read_index]
+        read_index += 1
+        var current_distance: int = int(distances[current])
+        for d in dirs:
+            var next: Vector2i = current + d
+            if not region.has(next) or distances.has(next):
+                continue
+            var next_distance := current_distance + 1
+            distances[next] = next_distance
+            parents[next] = current
+            max_distance = maxi(max_distance, next_distance)
+            frontier.append(next)
+            cells.append(next)
 
 func start_bomb(blast: Array[Vector2i], start_origin: Vector2i) -> void:
     reset()
@@ -323,27 +357,70 @@ func draw(host, cell_center: Callable, cell_rect: Callable, player_color: Callab
                 host.draw_circle(head, 3.0 + 2.0 * head_strength, head_core)
     elif kind == CardCatalog.SURGE:
         var progress: float = clamp(time / SURGE_DURATION, 0.0, 1.0)
+        var origin_center: Vector2 = cell_center.call(origin)
+        var travel_start := 0.08
+        var travel_span := 0.58
+        var trail_span := 0.34
 
-        # FLOOR LIGHTNING Phase 1: 接続している帯電床全体を一度だけ脈動させる。
-        # 「空から雷が落ちる」のではなく、床に蓄えた電気を一斉に解放する見せ方。
-        if progress < 0.42:
-            var pulse_t: float = clamp(progress / 0.42, 0.0, 1.0)
-            var pulse_strength: float = sin(pulse_t * PI)
-            for cell in cells:
-                var r: Rect2 = cell_rect.call(cell).grow(-3.0)
-                var floor_glow: Color = C_GLOW
-                floor_glow.a = 0.10 + 0.34 * pulse_strength
-                host.draw_rect(r, floor_glow)
-                var floor_edge: Color = C_CORE
-                floor_edge.a = 0.14 + 0.54 * pulse_strength
-                host.draw_rect(r, floor_edge, false, 1.5 + 1.8 * pulse_strength, true)
+        # FLOOR LIGHTNING Phase 1: 主人公自身を発火点として一瞬白く発光させる。
+        # ストレートボルトのような一方向射出ではなく、ここから電力網全体へ枝分かれする。
+        if progress < 0.24:
+            var origin_t: float = clamp(progress / 0.24, 0.0, 1.0)
+            var origin_strength: float = sin(origin_t * PI)
+            var origin_glow: Color = C_GLOW
+            origin_glow.a = 0.24 + 0.52 * origin_strength
+            var origin_core: Color = C_CORE
+            origin_core.a = 0.48 + 0.48 * origin_strength
+            host.draw_circle(origin_center, 10.0 + 8.0 * origin_strength, origin_glow)
+            host.draw_circle(origin_center, 4.0 + 3.0 * origin_strength, origin_core)
+            for i in range(4):
+                var dir := Vector2.RIGHT.rotated(float(i) * PI * 0.5)
+                var side := Vector2(-dir.y, dir.x)
+                var a: Vector2 = origin_center + dir * 6.0
+                var b: Vector2 = origin_center + dir * (16.0 + 5.0 * origin_strength) + side * sin(time * 120.0 + float(i) * 1.7) * 2.0
+                host.draw_line(a, b, origin_glow, 5.0, true)
+                host.draw_line(a, b, origin_core, 1.6, true)
 
-        # Phase 2: 敵が実際に占有していた帯電セルごとに、数十msずらして放電する。
-        # 大型敵が複数セルに重なっていれば、そのセル数だけ個別に光るためダメージ規則も視覚化できる。
+        # Phase 2: BFSで保存した分岐元から子セルへ、主人公から外側へ向かって高速伝播。
+        # 到達済みセルは白→シアン→青の残光へ落ち、PATHの流れそのものを見せる。
+        for i in range(cells.size()):
+            var cell: Vector2i = cells[i]
+            if not distances.has(cell):
+                continue
+            var distance: int = int(distances[cell])
+            var distance_ratio: float = float(distance) / float(maxi(1, max_distance))
+            var arrival_progress: float = travel_start + travel_span * distance_ratio
+            if progress < arrival_progress:
+                continue
+            var age: float = progress - arrival_progress
+            var trail_strength: float = 1.0 - clamp(age / trail_span, 0.0, 1.0)
+            if trail_strength <= 0.0:
+                continue
+
+            var r: Rect2 = cell_rect.call(cell).grow(-4.0)
+            var tile_fill: Color = C_GLOW.lerp(C_TRAIL, 1.0 - trail_strength)
+            tile_fill.a = 0.10 + 0.34 * trail_strength
+            host.draw_rect(r, tile_fill)
+            var tile_edge: Color = C_CORE.lerp(C_TRAIL, 1.0 - trail_strength)
+            tile_edge.a = 0.14 + 0.62 * trail_strength
+            host.draw_rect(r, tile_edge, false, 1.4 + 1.8 * trail_strength, true)
+
+            if cell != origin and parents.has(cell):
+                var parent: Vector2i = Vector2i(parents[cell])
+                var parent_center: Vector2 = cell_center.call(parent)
+                var current_center: Vector2 = cell_center.call(cell)
+                _draw_arc_lightning_segment(host, parent_center, current_center, 700 + i, trail_strength)
+
+        # Phase 3: 電流が敵占有セルへ到達した瞬間、床から上へ青白い放電を噴き上げる。
+        # 大型敵が複数セルを踏んでいれば、そのセル数だけ独立した柱が立つ。
         for i in range(secondary_cells.size()):
             var cell: Vector2i = secondary_cells[i]
-            var delay: float = 0.18 + float(i % 4) * 0.065
-            var local_t: float = (progress - delay) / 0.42
+            if not distances.has(cell):
+                continue
+            var distance: int = int(distances[cell])
+            var distance_ratio: float = float(distance) / float(maxi(1, max_distance))
+            var arrival_progress: float = travel_start + travel_span * distance_ratio
+            var local_t: float = (progress - arrival_progress) / 0.30
             if local_t < 0.0 or local_t > 1.0:
                 continue
             var discharge_strength: float = sin(clamp(local_t, 0.0, 1.0) * PI)
@@ -351,110 +428,130 @@ func draw(host, cell_center: Callable, cell_rect: Callable, player_color: Callab
             var r: Rect2 = cell_rect.call(cell).grow(-2.0)
 
             var hit_fill: Color = C_GLOW
-            hit_fill.a = 0.16 + 0.48 * discharge_strength
+            hit_fill.a = 0.20 + 0.50 * discharge_strength
             host.draw_rect(r, hit_fill)
             var hit_edge: Color = C_CORE
-            hit_edge.a = 0.34 + 0.62 * discharge_strength
-            host.draw_rect(r, hit_edge, false, 2.0 + 1.8 * discharge_strength, true)
+            hit_edge.a = 0.38 + 0.60 * discharge_strength
+            host.draw_rect(r, hit_edge, false, 2.2 + 2.0 * discharge_strength, true)
 
-            # セル内を縦に裂く短い白芯＋シアン発光。位置とtimeだけで揺らし、NodeやParticleは増やさない。
-            var top: Vector2 = center - Vector2(0.0, CELL_SIZE * 0.58)
-            var bottom: Vector2 = center + Vector2(0.0, CELL_SIZE * 0.48)
-            var points := PackedVector2Array()
-            var subdivisions := 5
-            for j in range(subdivisions + 1):
-                var jt: float = float(j) / float(subdivisions)
-                var p: Vector2 = top.lerp(bottom, jt)
-                if j > 0 and j < subdivisions:
-                    var seed: float = float((i + 1) * 23 + j * 41)
-                    var wobble: float = sin(seed * 0.83 + time * 101.0) * 4.2
-                    wobble += sin(seed * 1.47 + time * 149.0) * 1.8
-                    p.x += wobble * discharge_strength
-                points.append(p)
-            var bolt_glow: Color = C_GLOW
-            bolt_glow.a = 0.20 + 0.58 * discharge_strength
-            var bolt_core: Color = C_CORE
-            bolt_core.a = 0.34 + 0.64 * discharge_strength
-            host.draw_polyline(points, bolt_glow, 8.0, true)
-            host.draw_polyline(points, bolt_core, 2.2, true)
+            # 下端を床セル中心付近に固定し、上側へ広がる3本の裂けた電撃で「床から噴く」を強調。
+            var root: Vector2 = center + Vector2(0.0, CELL_SIZE * 0.26)
+            for branch in range(3):
+                var top_offset_x: float = float(branch - 1) * (8.0 + 5.0 * discharge_strength)
+                var top: Vector2 = center + Vector2(top_offset_x, -CELL_SIZE * (0.72 + 0.12 * discharge_strength))
+                var points := PackedVector2Array()
+                var subdivisions := 5
+                for j in range(subdivisions + 1):
+                    var jt: float = float(j) / float(subdivisions)
+                    var p: Vector2 = root.lerp(top, jt)
+                    if j > 0 and j < subdivisions:
+                        var seed: float = float((i + 1) * 29 + branch * 47 + j * 31)
+                        var wobble: float = sin(seed * 0.79 + time * 111.0) * 4.0
+                        wobble += sin(seed * 1.41 + time * 157.0) * 1.7
+                        p.x += wobble * discharge_strength
+                    points.append(p)
+                var bolt_glow: Color = C_GLOW
+                bolt_glow.a = (0.16 + 0.50 * discharge_strength) * (1.0 if branch == 1 else 0.74)
+                var bolt_core: Color = C_CORE
+                bolt_core.a = (0.28 + 0.66 * discharge_strength) * (1.0 if branch == 1 else 0.82)
+                host.draw_polyline(points, bolt_glow, 7.0 if branch == 1 else 5.0, true)
+                host.draw_polyline(points, bolt_core, 2.2 if branch == 1 else 1.5, true)
 
-            # 足元から弾けたことを見せる短いリング。盤面を覆わないサイズに留める。
-            host.draw_arc(center, 5.0 + 8.0 * local_t, 0.0, TAU, 24, hit_edge, 1.5 + 1.5 * discharge_strength, true)
+            # 根元だけ短いリングを出し、空からの落雷ではなく床由来であることを補強する。
+            host.draw_arc(root, 5.0 + 8.0 * local_t, 0.0, TAU, 24, hit_edge, 1.6 + 1.5 * discharge_strength, true)
     elif kind == CardCatalog.BOMB:
         var progress: float = clamp(time / BOMB_DURATION, 0.0, 1.0)
         var origin_center: Vector2 = cell_center.call(origin)
 
-        # THUNDER BOMB Phase 1: 3x3内の電荷を爆心へ一気に引き込む。
-        # 爆炎ではなく、床にある電気を圧縮してから破裂させる見せ方。
-        if progress < 0.31:
-            var charge_t: float = clamp(progress / 0.31, 0.0, 1.0)
-            var charge_strength: float = sin(charge_t * PI * 0.5)
-            for i in range(cells.size()):
-                var cell: Vector2i = cells[i]
-                if cell == origin:
-                    continue
-                var outer: Vector2 = cell_center.call(cell)
-                var converged: Vector2 = outer.lerp(origin_center, charge_t)
-                _draw_arc_lightning_segment(host, outer, converged, 200 + i, 0.34 + 0.58 * charge_strength)
+        # THUNDER BOMBは「爆発」ではなく、爆心から3x3の各セルへ高電圧を送り込み、
+        # 到達セルそのものを大きな電気フレームでロックして震わせる技として見せる。
 
-                # 吸い込まれる側のセルも短く明滅させ、どこから電荷を集めたかを残す。
-                var charge_rect: Rect2 = cell_rect.call(cell).grow(-6.0)
-                var charge_fill: Color = C_GLOW
-                charge_fill.a = 0.08 + 0.22 * charge_strength
-                host.draw_rect(charge_rect, charge_fill)
-
-        # Phase 2: 爆心を白く飽和。チャージSEの終端と破裂の瞬間を同期させる。
-        if progress >= 0.16 and progress < 0.48:
-            var core_t: float = clamp((progress - 0.16) / 0.32, 0.0, 1.0)
+        # Phase 1: 爆心を短く白く飽和させ、ここが電流の発生源だと先に示す。
+        if progress < 0.28:
+            var core_t: float = clamp(progress / 0.28, 0.0, 1.0)
             var core_peak: float = sin(core_t * PI)
-            var origin_rect: Rect2 = cell_rect.call(origin).grow(-3.0)
+            var origin_rect: Rect2 = cell_rect.call(origin).grow(-2.0)
             var origin_fill: Color = C_CORE
-            origin_fill.a = 0.22 + 0.70 * core_peak
+            origin_fill.a = 0.18 + 0.70 * core_peak
             host.draw_rect(origin_rect, origin_fill)
-
             var core_glow: Color = C_GLOW
-            core_glow.a = 0.22 + 0.58 * core_peak
+            core_glow.a = 0.24 + 0.56 * core_peak
             host.draw_circle(origin_center, 8.0 + 10.0 * core_peak, core_glow)
             var core_white: Color = C_CORE
-            core_white.a = 0.55 + 0.42 * core_peak
-            host.draw_circle(origin_center, 3.5 + 5.5 * core_peak, core_white)
+            core_white.a = 0.52 + 0.44 * core_peak
+            host.draw_circle(origin_center, 3.0 + 5.0 * core_peak, core_white)
 
-        # Phase 3: 圧縮した電荷を3x3へ枝状に放電。
-        # セルごとに僅かに発火をずらして、円形衝撃波ではなく電気が裂ける印象にする。
+        # Phase 2/3: 中心→上下左右→斜めの順で電流が走り、到達したセルに太い枠が出現。
+        # 枠は短時間だけ2〜3px細かく震え、マスそのものへ高電圧が掛かった印象を出す。
         for i in range(cells.size()):
             var cell: Vector2i = cells[i]
-            var delay: float = 0.30 + float(i % 4) * 0.018
-            var local_t: float = (progress - delay) / 0.34
-            if local_t < 0.0 or local_t > 1.0:
+            var arrival: float = _bomb_arrival_progress(cell, origin)
+            if progress < arrival:
                 continue
-            var discharge_strength: float = sin(clamp(local_t, 0.0, 1.0) * PI)
+
             var target_center: Vector2 = cell_center.call(cell)
-            var r: Rect2 = cell_rect.call(cell).grow(-3.0)
-
-            var tile_glow: Color = C_GLOW
-            tile_glow.a = 0.14 + 0.50 * discharge_strength
-            host.draw_rect(r, tile_glow)
-            var tile_core: Color = C_CORE
-            tile_core.a = 0.20 + 0.68 * discharge_strength
-            host.draw_rect(r, tile_core, false, 2.0 + 2.0 * discharge_strength, true)
-
             if cell != origin:
-                _draw_arc_lightning_segment(host, origin_center, target_center, 400 + i, discharge_strength)
+                var travel_span: float = 0.11 if absi(cell.x - origin.x) + absi(cell.y - origin.y) == 1 else 0.15
+                var travel_t: float = clamp((progress - (arrival - travel_span)) / travel_span, 0.0, 1.0)
+                if travel_t < 1.0:
+                    var current_end: Vector2 = origin_center.lerp(target_center, travel_t)
+                    _draw_arc_lightning_segment(host, origin_center, current_end, 400 + i, 0.50 + 0.50 * sin(travel_t * PI * 0.5))
+                else:
+                    # 到達後もごく短く電気の線を残し、中心とのつながりを見せる。
+                    var wire_age: float = progress - arrival
+                    var wire_strength: float = 1.0 - clamp(wire_age / 0.17, 0.0, 1.0)
+                    if wire_strength > 0.0:
+                        _draw_arc_lightning_segment(host, origin_center, target_center, 400 + i, wire_strength)
 
-            # 到達セルの中央だけ短く白く焼ける。盤面を隠す大きな円は使わない。
-            if discharge_strength > 0.18:
-                var spark: Color = C_CORE
-                spark.a = 0.24 + 0.66 * discharge_strength
-                host.draw_circle(target_center, 3.0 + 4.5 * discharge_strength, spark)
+            var frame_age: float = progress - arrival
+            if frame_age > 0.42:
+                continue
+            var appear: float = clamp(frame_age / 0.055, 0.0, 1.0)
+            var fade: float = 1.0 - clamp((frame_age - 0.28) / 0.14, 0.0, 1.0)
+            var frame_strength: float = appear * fade
+            if frame_strength <= 0.0:
+                continue
 
-        # Phase 4: 破裂後は3x3へ青い残光だけを短く残し、床が帯電したことを見せる。
-        if progress >= 0.56:
-            var trail_t: float = clamp((progress - 0.56) / 0.44, 0.0, 1.0)
+            # セルごとに位相を変えた固定波形で振動。乱数NodeやParticleは使わない。
+            var shake_env: float = 1.0 - clamp(frame_age / 0.20, 0.0, 1.0)
+            var shake_x: float = sin(time * 186.0 + float(i) * 2.31) * 2.8 * shake_env
+            var shake_y: float = sin(time * 229.0 + float(i) * 1.47) * 2.0 * shake_env
+            var r: Rect2 = cell_rect.call(cell).grow(-1.5)
+            r.position += Vector2(shake_x, shake_y)
+
+            var frame_glow: Color = C_GLOW
+            frame_glow.a = 0.22 + 0.48 * frame_strength
+            host.draw_rect(r.grow(1.5), frame_glow, false, 7.0 * frame_strength, true)
+            var frame_core: Color = C_CORE
+            frame_core.a = 0.34 + 0.64 * frame_strength
+            host.draw_rect(r, frame_core, false, 2.8 + 2.7 * frame_strength, true)
+
+            # 枠の内側も薄く明滅させ、線だけのUI枠ではなくセルそのものが帯電しているようにする。
+            var frame_fill: Color = C_GLOW
+            frame_fill.a = 0.06 + 0.17 * frame_strength
+            host.draw_rect(r.grow(-4.0), frame_fill)
+
+        # Phase 4: 9マスのロックが揃った瞬間、全枠を同時に一度だけ白くブレイクさせる。
+        if progress >= 0.56 and progress < 0.74:
+            var break_t: float = clamp((progress - 0.56) / 0.18, 0.0, 1.0)
+            var break_strength: float = sin(break_t * PI)
+            for cell in cells:
+                var r: Rect2 = cell_rect.call(cell).grow(-0.5)
+                var break_glow: Color = C_GLOW
+                break_glow.a = 0.20 + 0.48 * break_strength
+                host.draw_rect(r.grow(2.0), break_glow, false, 8.0 * break_strength, true)
+                var break_core: Color = C_CORE
+                break_core.a = 0.26 + 0.70 * break_strength
+                host.draw_rect(r, break_core, false, 2.5 + 3.2 * break_strength, true)
+
+        # Phase 5: 白い枠が消えた後は青い残光だけ残し、3x3が帯電した結果へ自然につなぐ。
+        if progress >= 0.68:
+            var trail_t: float = clamp((progress - 0.68) / 0.32, 0.0, 1.0)
             var trail_alpha: float = 1.0 - trail_t
             for cell in cells:
                 var trail: Color = C_TRAIL
-                trail.a = 0.26 * trail_alpha
-                host.draw_rect(cell_rect.call(cell).grow(-4.0), trail)
+                trail.a = 0.24 * trail_alpha
+                host.draw_rect(cell_rect.call(cell).grow(-3.0), trail)
 
     elif kind == CardCatalog.WARP:
         var progress: float = clamp(time / WARP_DURATION, 0.0, 1.0)

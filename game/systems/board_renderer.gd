@@ -166,7 +166,11 @@ func draw_enemies() -> void:
             draw_order.append(enemy)
 
     for e in draw_order:
-        h.draw_set_transform(base_offset + h._enemy_hit_reaction_offset(e))
+        var hit_scale: Vector2 = h._enemy_hit_reaction_scale(e)
+        var hit_anchor: Vector2 = h._enemy_bounds_rect(e).get_center()
+        # draw_*は盤面絶対座標なので、anchor - anchor*scale を足して敵の中心を固定したまま拡大する。
+        var hit_scale_offset: Vector2 = hit_anchor * (Vector2.ONE - hit_scale)
+        h.draw_set_transform(base_offset + h._enemy_hit_reaction_offset(e) + hit_scale_offset, 0.0, hit_scale)
         var ep: Vector2i = e["pos"]
         var c: Vector2 = h._cell_center(ep)
         var enemy_type: String = str(e.get("type", "chaser"))
@@ -409,6 +413,12 @@ func draw_enemy_hit_flashes() -> void:
             r.position += jitter
             h.draw_rect(r, Color(1.0, 1.0, 1.0, alpha_fill))
             h.draw_rect(r, Color(1.0, 1.0, 1.0, alpha_edge), false, edge_width, true)
+            if tier >= 3 and progress < 0.46:
+                # 大ダメージだけ、セル外へ一段だけ衝撃枠を弾ませる。大量Particleは使わない。
+                var heavy_t: float = clampf(progress / 0.46, 0.0, 1.0)
+                var heavy_rect: Rect2 = r.grow(lerpf(2.0, 7.0, heavy_t))
+                var heavy_alpha: float = (1.0 - heavy_t) * 0.90
+                h.draw_rect(heavy_rect, Color(0.74, 0.95, 1.0, heavy_alpha), false, lerpf(4.5, 2.0, heavy_t), true)
             cell_index += 1
 
     _draw_enemy_destroy_fx()
@@ -426,16 +436,16 @@ func _draw_enemy_damage_numbers() -> void:
         var tier: int = int(item.get("tier", 1))
         var amount: int = int(item.get("amount", 0))
         # 瞬間情報はHPより明確に大きくする。大型ヒットほどさらに一段大きい。
-        var font_size: int = 24 if tier == 1 else (29 if tier == 2 else 35)
+        var font_size: int = 24 if tier == 1 else (29 if tier == 2 else 40)
         var pop: float = sin(minf(1.0, progress / 0.28) * PI) * (3.0 if tier == 1 else (5.0 if tier == 2 else 7.0))
         var center: Vector2 = Vector2(item.get("center", Vector2.ZERO)) + Vector2(0.0, -14.0 - 20.0 * progress - pop)
         var text: String = str(amount)
         var text_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
         var baseline: Vector2 = center + Vector2(-text_size.x * 0.5, text_size.y * 0.36)
         var alpha: float = 1.0 if progress < 0.68 else clampf((1.0 - progress) / 0.32, 0.0, 1.0)
-        var white: Color = Color(1.0, 1.0, 1.0, alpha)
-        var outline: float = 3.0 if tier == 1 else (4.0 if tier == 2 else 5.0)
-        _draw_outlined_text(font, baseline, text, font_size, white, outline, alpha)
+        var number_color: Color = Color(1.0, 1.0, 1.0, alpha) if tier < 3 else Color(0.82, 0.97, 1.0, alpha)
+        var outline: float = 3.0 if tier == 1 else (4.0 if tier == 2 else 6.0)
+        _draw_outlined_text(font, baseline, text, font_size, number_color, outline, alpha)
 
 func _draw_enemy_destroy_fx() -> void:
     for item in h.enemy_destroy_fx:

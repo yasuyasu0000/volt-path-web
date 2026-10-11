@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.962
+# VOLT PATH ver0.967
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -44,6 +44,7 @@ const SFX_STEP_CHARGE := &"step_charge"
 const SFX_STEP_CHARGED := &"step_charged"
 const SFX_PLAYER_HURT := &"player_hurt"
 const SFX_ENEMY_HIT := &"enemy_hit"
+const SFX_ENEMY_HEAVY_HIT := &"enemy_heavy_hit"
 const SFX_ENEMY_DESTROY := &"enemy_destroy"
 const SFX_CARD_ARC := &"card_arc"
 const SFX_CARD_SURGE := &"card_surge"
@@ -173,7 +174,8 @@ const ENEMY_HIT_SHAKE_PIXELS := 3.0
 const ENEMY_DAMAGE_NUMBER_DURATION := 0.48
 const ENEMY_DESTROY_FX_DURATION := 0.34
 const ENEMY_IMPACT_SHAKE_DURATION := 0.16
-const ENEMY_IMPACT_FREEZE_DURATION := 0.06
+const ENEMY_IMPACT_FREEZE_DURATION := 0.075
+const ENEMY_HEAVY_HIT_SCALE := 1.12
 
 var rng := RandomNumberGenerator.new()
 var walls: Dictionary = {}
@@ -979,13 +981,9 @@ func _boss_stomp(index: int) -> void:
             var knockback_target: Vector2i = _boss_stomp_knockback_target(stomp_cells)
             if knockback_target != player_pos:
                 player_pos = knockback_target
-                message = "踏みつけ：HP -1。脚の外へ弾き出されました。"
-            else:
-                message = "踏みつけ：HP -1。"
-        else:
-            message = "踏みつけ：HP -1。"
+                message += "脚の外へ弾き出されました。"
     else:
-        message = "脚が踏みつけました。"
+        message = ""
 
 func _boss_stomp_knockback_target(stomp_cells: Array[Vector2i]) -> Vector2i:
     if stomp_cells.is_empty() or not stomp_cells.has(player_pos):
@@ -1537,7 +1535,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.959", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.967", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -1643,7 +1641,7 @@ func _play_hand_slot(slot: int) -> void:
     var cost := _card_cost(card_id)
     if bat < cost:
         _play_sfx(SFX_UI_BAT_DENIED)
-        message = "%sにはBATが%d必要です。" % [_card_name(card_id), cost]
+        message = "BATが不足しています。"
         return
 
     active_hand_slot = slot
@@ -1664,7 +1662,7 @@ func _play_hand_slot(slot: int) -> void:
 func _reroll_hand() -> void:
     if bat < REROLL_COST:
         _play_sfx(SFX_UI_BAT_DENIED)
-        message = "リロールにはBATが%d必要です。" % REROLL_COST
+        message = "BATが不足しています。"
         return
     _spend_bat(REROLL_COST)
     _play_sfx(SFX_UI_REROLL)
@@ -1699,6 +1697,7 @@ func _handle_aim_input(keycode: int) -> void:
         KEY_RIGHT:
             d = Vector2i.RIGHT
         KEY_X, KEY_ESCAPE:
+            var canceled_skill_name: String = _card_name(aim_mode)
             aim_mode = ""
             active_hand_slot = -1
             dash_path_preview.clear()
@@ -1706,7 +1705,7 @@ func _handle_aim_input(keycode: int) -> void:
             dash_route_customized = false
             loop_candidates.clear()
             loop_candidate_index = 0
-            message = "カードをキャンセルしました。"
+            message = "%sをキャンセルしました。" % canceled_skill_name
             _schedule_auto_pass_if_needed()
             return
         KEY_Z, KEY_ENTER, KEY_SPACE:
@@ -1746,10 +1745,10 @@ func _try_move(d: Vector2i) -> void:
     player_facing = d
     var target: Vector2i = player_pos + d
     if not _is_floor(target):
-        message = "その方向には進めません。"
+        message = ""
         return
     if _enemy_index_at(target) != -1:
-        message = "敵がいて進めません。カードで攻撃してください。"
+        message = ""
         return
 
     player_pos = target
@@ -1763,9 +1762,7 @@ func _try_move(d: Vector2i) -> void:
         _play_sfx(SFX_STEP_CHARGE)
         message = ""
 
-    var overload_damage: int = _apply_full_charge_movement_damage()
-    if overload_damage > 0:
-        message = "全面帯電：移動ダメージ HP -%d" % overload_damage
+    var _overload_damage: int = _apply_full_charge_movement_damage()
     _finish_player_turn()
 
 func _start_arc_fx(path: Array[Vector2i]) -> void:
@@ -1820,7 +1817,7 @@ func _confirm_arc() -> void:
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "BATが足りません。"
+        message = "BATが不足しています。"
         return
     _spend_bat(cost)
     _play_sfx(SFX_CARD_ARC)
@@ -1848,7 +1845,7 @@ func _confirm_arc() -> void:
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "ストレートボルト：%d体に合計%dダメージ。" % [hit_count, total_damage] if hit_count > 0 else "帯電した直線上に敵がいません。"
+    message = ""
     _start_arc_fx(last_attack_cells)
 
 func _arc_path(d: Vector2i) -> Array[Vector2i]:
@@ -1869,7 +1866,7 @@ func _confirm_surge() -> void:
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "フロアライトニングにはBATが%d必要です。" % cost
+        message = "BATが不足しています。"
         return
     _spend_bat(cost)
     _play_sfx(SFX_CARD_SURGE)
@@ -1879,9 +1876,14 @@ func _confirm_surge() -> void:
     var total_damage := 0
     var earliest_hit_delay := 999.0
     var surge_hit_cells: Array[Vector2i] = []
+    var surge_hits: Array[Dictionary] = []
+
     for key in region.keys():
         var p: Vector2i = Vector2i(key)
         last_attack_cells.append(p)
+
+    # 先に全命中セルを確定し、Skill FX側で主人公起点のBFS距離を一度だけ作る。
+    # その後、各敵の被ダメージ演出を実際の電流到達時刻へ同期する。
     for i in range(enemies.size()):
         var covered_cells: int = _enemy_covered_region_count(enemies[i], region)
         if covered_cells <= 0:
@@ -1891,18 +1893,30 @@ func _confirm_surge() -> void:
         for hit_cell in hit_cells:
             if hit_cell not in surge_hit_cells:
                 surge_hit_cells.append(hit_cell)
-        var visual_delay: float = skill_fx.surge_hit_delay(surge_hit_cells, hit_cells)
-        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
-        _damage_enemy(i, damage, hit_cells, visual_delay)
+        surge_hits.append({
+            "index": i,
+            "damage": damage,
+            "hit_cells": hit_cells,
+        })
         hit_count += 1
         total_damage += damage
+
+    _start_surge_fx(region, surge_hit_cells)
+
+    for hit in surge_hits:
+        var hit_cells: Array[Vector2i] = []
+        for p in hit.get("hit_cells", []):
+            hit_cells.append(Vector2i(p))
+        var visual_delay: float = skill_fx.surge_hit_delay(hit_cells)
+        earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
+        _damage_enemy(int(hit.get("index", -1)), int(hit.get("damage", 0)), hit_cells, visual_delay)
+
     if hit_count > 0:
         _queue_enemy_hit_sfx(earliest_hit_delay)
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "フロアライトニング：%d体に合計%dダメージ。" % [hit_count, total_damage]
-    _start_surge_fx(region, surge_hit_cells)
+    message = ""
 
 func _connected_charged_region(start: Vector2i) -> Dictionary:
     var seen: Dictionary = {}
@@ -1928,12 +1942,12 @@ func _begin_bomb() -> void:
 func _confirm_bomb() -> void:
     var cost := _card_cost(CARD_BOMB)
     if not _is_floor(bomb_cursor) or not charged.has(bomb_cursor):
-        message = "サンダーボムは帯電マスを爆心にしてください。"
+        message = "帯電しているマスを選択してください。"
         return
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "BATが足りません。"
+        message = "BATが不足しています。"
         return
     _spend_bat(cost)
     _play_sfx(SFX_CARD_BOMB)
@@ -1959,7 +1973,7 @@ func _confirm_bomb() -> void:
         # すべての敵で、爆発に入った占有マス数ぶんダメージが重なる。
         var damage: int = GameBalance.BOMB_DAMAGE_PER_CELL * covered_cells
         var hit_cells: Array[Vector2i] = _enemy_hit_cells_from_list(enemies[i], blast)
-        var visual_delay: float = skill_fx.bomb_hit_delay(blast, hit_cells)
+        var visual_delay: float = skill_fx.bomb_hit_delay(blast, hit_cells, bomb_cursor)
         earliest_hit_delay = minf(earliest_hit_delay, visual_delay)
         _damage_enemy(i, damage, hit_cells, visual_delay)
         hit_count += 1
@@ -1969,7 +1983,7 @@ func _confirm_bomb() -> void:
     _consume_active_card()
     aim_mode = ""
     active_hand_slot = -1
-    message = "サンダーボム：%d体に合計%dダメージ。" % [hit_count, total_damage]
+    message = ""
     _start_bomb_fx(blast, bomb_cursor)
 
 func _begin_warp() -> void:
@@ -1980,10 +1994,10 @@ func _begin_warp() -> void:
 func _confirm_warp() -> void:
     var cost: int = _card_cost(CARD_WARP)
     if warp_cursor == player_pos:
-        message = "別の帯電マスを選んでください。"
+        message = "別の帯電マスを選択してください。"
         return
     if not _is_floor(warp_cursor) or not charged.has(warp_cursor):
-        message = "帯電マスを選んでください。"
+        message = "帯電しているマスを選択してください。"
         return
     if _enemy_index_at(warp_cursor) != -1:
         message = "敵がいるマスにはワープできません。"
@@ -1991,7 +2005,7 @@ func _confirm_warp() -> void:
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "BATが足りません。"
+        message = "BATが不足しています。"
         return
 
     _spend_bat(cost)
@@ -2002,7 +2016,8 @@ func _confirm_warp() -> void:
     var overload_damage: int = _apply_full_charge_movement_damage()
     _consume_active_card()
     aim_mode = ""
-    message = "全面帯電：ワープ移動 HP -%d" % overload_damage if overload_damage > 0 else ""
+    if overload_damage <= 0:
+        message = ""
     _start_warp_fx(warp_origin, warp_target)
 
 func _begin_dash() -> void:
@@ -2033,10 +2048,7 @@ func _handle_dash_direction_input(d: Vector2i) -> void:
             dash_branch_origin = player_pos if dash_path_preview.is_empty() else dash_path_preview[dash_path_preview.size() - 1]
             dash_branch_options.clear()
             dash_route_customized = not dash_path_preview.is_empty()
-            if dash_path_preview.is_empty():
-                message = "経路：開始地点"
-            else:
-                message = "経路：%dマス" % dash_path_preview.size()
+            message = ""
             return
 
     if not _is_floor(next) or not charged.has(next):
@@ -2051,7 +2063,7 @@ func _handle_dash_direction_input(d: Vector2i) -> void:
     dash_branch_options.clear()
     dash_route_customized = true
     aim_dir = d
-    message = "経路：%dマス" % dash_path_preview.size()
+    message = ""
 
 func _confirm_dash() -> void:
     # 方向キーで1マスずつ積み上げた現在のプレビュー経路を、そのまま発動する。
@@ -2067,7 +2079,7 @@ func _confirm_dash() -> void:
     if bat < cost:
         aim_mode = ""
         active_hand_slot = -1
-        message = "BATが足りません。"
+        message = "BATが不足しています。"
         return
 
     _spend_bat(cost)
@@ -2117,22 +2129,15 @@ func _confirm_dash() -> void:
     dash_path_preview.clear()
     dash_branch_options.clear()
     dash_route_customized = false
-    if hit_count > 0:
-        message = "チェインダッシュ：%d体を貫通し、合計%dダメージ。" % [hit_count, total_damage]
-    else:
-        message = "チェインダッシュ：帯電路を%dマス走り抜けました。" % path.size()
-    if overload_damage > 0:
-        message += "  全面帯電：HP -%d" % overload_damage
+    if overload_damage <= 0:
+        message = ""
     _start_dash_fx(dash_origin, path, destination)
 
 func _begin_loop() -> void:
     aim_mode = CARD_LOOP
     loop_candidates = _loop_candidates()
     loop_candidate_index = 0
-    if loop_candidates.size() > 1:
-        message = "ループ候補 1 / %d" % loop_candidates.size()
-    else:
-        message = ""
+    message = ""
 
 func _cycle_loop_candidate(d: Vector2i) -> void:
     if loop_candidates.size() <= 1:
@@ -2141,7 +2146,7 @@ func _cycle_loop_candidate(d: Vector2i) -> void:
     if d == Vector2i.LEFT or d == Vector2i.UP:
         step = -1
     loop_candidate_index = posmod(loop_candidate_index + step, loop_candidates.size())
-    message = "ループ候補 %d / %d" % [loop_candidate_index + 1, loop_candidates.size()]
+    message = ""
 
 func _selected_loop_candidate() -> Dictionary:
     if loop_candidates.is_empty():
@@ -2175,7 +2180,7 @@ func _confirm_loop() -> void:
         active_hand_slot = -1
         loop_candidates.clear()
         loop_candidate_index = 0
-        message = "サーキットブレイクにはBATが%d必要です。" % cost
+        message = "BATが不足しています。"
         return
 
     var inside: Array[Vector2i] = _selected_loop_inside_cells()
@@ -2224,7 +2229,7 @@ func _confirm_loop() -> void:
     active_hand_slot = -1
     loop_candidates.clear()
     loop_candidate_index = 0
-    message = "サーキットブレイク：%d体に合計%dダメージ。内側%dマスが帯電しました。" % [hit_count, total_damage, inside.size()]
+    message = ""
     _start_loop_fx(boundary, inside)
 
 func _loop_boundary_cells(inside: Array[Vector2i]) -> Array[Vector2i]:
@@ -2708,7 +2713,7 @@ func _apply_player_damage(amount: int, source: String = "contact", enemy_type: S
         _track_damage_taken_event(actual_damage, source, enemy_type)
         _play_sfx(SFX_PLAYER_HURT)
         _start_damage_feedback(actual_damage)
-        message = "HP -%d" % actual_damage
+        message = "%dダメージを受けた。" % actual_damage
 
 func _start_damage_feedback(amount: int) -> void:
     # 被弾演出はpresentationだけを担当し、ターン進行や入力を止めない。
@@ -2936,6 +2941,7 @@ func _emit_enemy_hit_visual(event: Dictionary) -> void:
         enemies[index]["hit_fx_duration"] = reaction_duration
         enemies[index]["hit_fx_sequence"] = event_id
         enemies[index]["hit_fx_strength"] = local_strength
+        enemies[index]["hit_fx_tier"] = tier
 
     enemy_hit_flashes.append({
         "cells": hit_cells,
@@ -2955,9 +2961,11 @@ func _emit_enemy_hit_visual(event: Dictionary) -> void:
     # 中ダメージ以上の盤面揺れと6DMG以上のヒットストップも命中瞬間から開始する。
     if tier >= 2:
         enemy_impact_shake_time = ENEMY_IMPACT_SHAKE_DURATION
-        enemy_impact_shake_strength = maxf(enemy_impact_shake_strength, 0.55 if tier == 2 else 1.0)
+        enemy_impact_shake_strength = maxf(enemy_impact_shake_strength, 0.55 if tier == 2 else 1.18)
         enemy_impact_shake_sequence += 1
     if tier >= 3:
+        # 6DMG以上だけは通常ヒット音へ低い衝撃音を重ね、時間・敵本体・盤面の反応を同時に強くする。
+        _play_sfx(SFX_ENEMY_HEAVY_HIT)
         enemy_impact_freeze_time = maxf(enemy_impact_freeze_time, ENEMY_IMPACT_FREEZE_DURATION)
 
     if bool(event.get("destroyed", false)) and str(event.get("enemy_type", "")) != "boss_leg":
@@ -3075,6 +3083,20 @@ func _enemy_hit_reaction_offset(enemy: Dictionary) -> Vector2:
     var amplitude: float = ENEMY_HIT_SHAKE_PIXELS * strength * envelope
     return Vector2(sin(phase), cos(phase * 1.31)) * amplitude
 
+func _enemy_hit_reaction_scale(enemy: Dictionary) -> Vector2:
+    # HEAVY HITだけ敵本体を一瞬膨らませる。通常/中ヒットのシルエットは動かさない。
+    if int(enemy.get("hit_fx_tier", 1)) < 3:
+        return Vector2.ONE
+    var time_left: float = float(enemy.get("hit_fx_time", 0.0))
+    if time_left <= 0.0:
+        return Vector2.ONE
+    var duration: float = maxf(0.001, float(enemy.get("hit_fx_duration", ENEMY_HIT_REACTION_DURATION)))
+    var progress: float = 1.0 - clampf(time_left / duration, 0.0, 1.0)
+    # 命中直後に最大、約0.12秒で素早く原寸へ戻す。ヒットストップ中は最大膨張で静止する。
+    var punch: float = pow(maxf(0.0, 1.0 - progress / 0.56), 2.0)
+    var scale_value: float = lerpf(1.0, ENEMY_HEAVY_HIT_SCALE, punch)
+    return Vector2(scale_value, scale_value)
+
 func _enemy_impact_shake_offset() -> Vector2:
     if enemy_impact_freeze_time > 0.0:
         return Vector2.ZERO
@@ -3157,8 +3179,6 @@ func _refresh_full_charge_hazard_state() -> void:
     if full_charge_hazard_active == should_be_active:
         return
     full_charge_hazard_active = should_be_active
-    if full_charge_hazard_active:
-        message = "全面帯電：移動するたびHP -%d" % FULL_CHARGE_MOVE_DAMAGE
     queue_redraw()
 
 func _apply_full_charge_movement_damage() -> int:
