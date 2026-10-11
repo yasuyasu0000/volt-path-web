@@ -33,6 +33,11 @@ func draw_restart_confirm() -> void:
         return
     _draw_restart_confirm()
 
+func draw_stage_intro() -> void:
+    if h == null or not h.stage_intro_active:
+        return
+    _draw_stage_intro()
+
 func _draw_side_panels() -> void:
     # 左=カード、中央=盤面、右=必要な状態だけ。見出しやタイトルは置かない。
     var left_panel := Rect2(Vector2(14, 14), Vector2(232, 692))
@@ -103,10 +108,10 @@ func _draw_hud() -> void:
 
     # 通常操作は右下へ4段のキートップ式で表示。
     # 照準中は中央下のコンテキストガイドへ切り替え、二重表示を避ける。
-    if h.aim_mode == "" and not h.game_over and not h.run_clear and not h.stage_clear:
+    if h.aim_mode == "" and not h.game_over and not h.run_clear and not h.stage_clear and not h.stage_intro_active:
         _draw_basic_control_guide()
 
-    if h.aim_mode != "" and not h.game_over and not h.run_clear and not h.stage_clear:
+    if h.aim_mode != "" and not h.game_over and not h.run_clear and not h.stage_clear and not h.stage_intro_active:
         _draw_context_action_guide()
 
     # 通常時は結果・エラーを表示。スキル選択中は同じメッセージ欄を
@@ -161,6 +166,17 @@ func _draw_hud() -> void:
         h.draw_line(Vector2(493, 392), Vector2(827, 392), h.C_FLOOR_EDGE, 1.0)
         h.draw_string(font, Vector2(532, 432), "Z  RETRY", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
         h.draw_string(font, Vector2(678, 432), "X  TITLE", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
+
+func _draw_stage_intro() -> void:
+    var alpha: float = h._stage_intro_alpha()
+    if alpha <= 0.0:
+        return
+    var font: Font = h.ui_font
+    var rect := Rect2(Vector2(437, 270), Vector2(446, 140))
+    h.draw_rect(rect, Color(0.0, 0.0, 0.0, 0.92 * alpha), true)
+    h.draw_rect(rect, Color(h.C_FLOOR_EDGE, alpha), false, 1.0)
+    var text_color := Color(h.C_TEXT, alpha)
+    h.draw_string(font, rect.position + Vector2(0.0, 88.0), "STAGE %d" % h.current_floor, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 38, text_color)
 
 func _draw_basic_control_guide() -> void:
     var font: Font = h.ui_font

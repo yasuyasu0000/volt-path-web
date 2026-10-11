@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.969
+# VOLT PATH ver0.970
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -31,6 +31,8 @@ const MAX_HP := 6
 const REROLL_COST := GameBalance.REROLL_COST
 const TOTAL_FLOORS := 10
 const AUTO_PASS_DELAY := 1.0
+const STAGE_INTRO_DURATION := 3.0
+const STAGE_INTRO_FADE_DURATION := 0.16
 const FULL_CHARGE_MOVE_DAMAGE := GameBalance.FULL_CHARGE_MOVE_DAMAGE
 const FULL_CHARGE_ENEMY_DAMAGE := GameBalance.FULL_CHARGE_ENEMY_DAMAGE
 const FULL_CHARGE_FLASH_INTERVAL := 0.16
@@ -194,6 +196,8 @@ var full_charge_hazard_active := false
 var current_floor := 1
 var stage_clear := false
 var stage_clear_timer := 0.0
+var stage_intro_active := false
+var stage_intro_elapsed := 0.0
 var run_clear := false
 var run_elapsed_seconds: float = 0.0
 var step_count := 0
@@ -320,6 +324,8 @@ func reset_run() -> void:
     current_floor = 1
     stage_clear = false
     stage_clear_timer = 0.0
+    stage_intro_active = false
+    stage_intro_elapsed = 0.0
     run_clear = false
     run_elapsed_seconds = 0.0
     step_count = 0
@@ -381,9 +387,8 @@ func reset_run() -> void:
     dash_branch_options.clear()
     dash_branch_origin = player_pos
     dash_route_customized = false
-    _reset_floor_analytics_baseline()
-    _capture_stage_restart_snapshot()
-    _schedule_auto_pass_if_needed()
+    # FLOORの計測開始・リスタート基準・自動待機判定は、
+    # STAGEイントロが閉じて実際に操作可能になった瞬間へ統一する。
 
 func _process(delta: float) -> void:
     # タイトル画面ではランをまだ生成せず、タイマー・敵・演出を完全に停止する。
@@ -397,6 +402,18 @@ func _process(delta: float) -> void:
     # リスタート確認中はゲーム内時間・演出・敵進行を完全に停止する。
     if restart_confirm_active:
         _redraw_accumulator = 0.0
+        return
+
+    # STAGEイントロ中は盤面の論理・演出・ゲーム内時間を完全停止する。
+    # 静止区間は再描画せず、短いフェード区間だけ更新して軽量に保つ。
+    if stage_intro_active:
+        stage_intro_elapsed += delta
+        if stage_intro_elapsed >= STAGE_INTRO_DURATION:
+            _finish_stage_intro()
+            return
+        var remaining: float = STAGE_INTRO_DURATION - stage_intro_elapsed
+        if stage_intro_elapsed <= STAGE_INTRO_FADE_DURATION or remaining <= STAGE_INTRO_FADE_DURATION:
+            queue_redraw()
         return
 
     # 0 = no continuous visual update, 1 = slow idle animation, 2 = short active FX.
@@ -511,7 +528,7 @@ func _process(delta: float) -> void:
     _schedule_visual_redraw(delta, redraw_priority)
 
 func _run_timer_should_advance() -> bool:
-    if game_over or run_clear or stage_clear:
+    if game_over or run_clear or stage_clear or stage_intro_active:
         return false
     if auto_pass_pending or reroll_anim_active or card_replace_anim_active or skill_turn_pending:
         return false
@@ -539,6 +556,8 @@ func _start_next_stage() -> void:
     hp = MAX_HP
     stage_clear = false
     stage_clear_timer = 0.0
+    stage_intro_active = false
+    stage_intro_elapsed = 0.0
     full_charge_hazard_active = false
     walls.clear()
     charged.clear()
@@ -581,11 +600,37 @@ func _start_next_stage() -> void:
         message = ""
     last_player_damage_source = ""
     last_player_damage_enemy_type = ""
+    _begin_stage_intro()
+    queue_redraw()
+
+func _begin_stage_intro() -> void:
+    stage_intro_active = true
+    stage_intro_elapsed = 0.0
+    auto_pass_pending = false
+    auto_pass_timer = 0.0
+    queue_redraw()
+
+func _finish_stage_intro() -> void:
+    if not stage_intro_active:
+        return
+    stage_intro_active = false
+    stage_intro_elapsed = 0.0
+    # ここがFLOORの実プレイ開始点。待機3秒は計測へ含めない。
     _reset_floor_analytics_baseline()
     _capture_stage_restart_snapshot()
     _track_floor_start_event()
     _schedule_auto_pass_if_needed()
     queue_redraw()
+
+func _stage_intro_alpha() -> float:
+    if not stage_intro_active:
+        return 0.0
+    var alpha := 1.0
+    if STAGE_INTRO_FADE_DURATION > 0.0:
+        alpha = minf(alpha, stage_intro_elapsed / STAGE_INTRO_FADE_DURATION)
+        var remaining: float = STAGE_INTRO_DURATION - stage_intro_elapsed
+        alpha = minf(alpha, remaining / STAGE_INTRO_FADE_DURATION)
+    return clampf(alpha, 0.0, 1.0)
 
 func _capture_stage_restart_snapshot() -> void:
     # 「この階層を始めから」は新しい乱数を引き直さず、階層入場時点をそのまま復元する。
@@ -1508,10 +1553,9 @@ func _start_run_from_title() -> void:
     reset_run()
     if web_analytics != null:
         web_analytics.track("game_start", _analytics_run_payload())
-    _track_floor_start_event()
     title_screen_active = false
     title_menu_index = 0
-    queue_redraw()
+    _begin_stage_intro()
 
 func _draw_title_screen() -> void:
     var font: Font = ui_font
@@ -1535,7 +1579,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.969", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.970", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -1565,6 +1609,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
     if title_screen_active:
         _handle_title_input(event.keycode)
+        return
+
+    if stage_intro_active:
+        if event.keycode == KEY_Z:
+            _finish_stage_intro()
         return
 
     if restart_confirm_active:
@@ -3305,5 +3354,6 @@ func _draw() -> void:
     # 外周フレームは揺らさず、被弾した瞬間の画面境界として残す。
     draw_set_transform(Vector2.ZERO)
     _draw_damage_frame()
+    hud_renderer.draw_stage_intro()
     hud_renderer.draw_restart_confirm()
 

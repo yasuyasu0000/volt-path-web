@@ -1,4 +1,4 @@
-VOLT PATH ver0.969
+VOLT PATH ver0.970
 =================
 対象: Godot 4.7.x / Compatibility
 
