@@ -1,4 +1,4 @@
-VOLT PATH ver0.967
+VOLT PATH ver0.968
 =================
 対象: Godot 4.7.x / Compatibility
 
@@ -131,7 +131,7 @@ Web公開 / Analytics
 ・GA4 Measurement IDを設定済み。Web版ではAnalytics送信がON。
 ・Web版のみGA4へ送信。難易度分析用イベント: game_start / floor_start / damage_taken / floor_clear / game_over / floor_retry / game_clear。
 ・被ダメージsourceは contact / ranged / charge / area / boss_stomp / overcharge の6分類。敵由来では内部確認用enemy_typeも送信する。
-・FLOOR終了時は floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining を集計。BAT系やskill_use等は送信しない。
+・FLOOR終了時は floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining を集計。FLOOR 10クリア時も floor_clear を送信し、その直後にラン全体完了の game_clear を送信する。BAT系やskill_use等は送信しない。
 ・詳細はGITHUB_PAGES_DEPLOY.txtを参照。
 
 ファイル構成

@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.967
+# VOLT PATH ver0.968
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -1535,7 +1535,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.967", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.968", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -2588,6 +2588,9 @@ func _finish_player_turn() -> void:
         auto_pass_pending = false
         auto_pass_timer = 0.0
         _play_sfx(SFX_GAME_CLEAR)
+        # FLOOR 10も通常FLOORと同じ集計へ含める。
+        # floor_clear=各FLOOR完了、game_clear=ラン全体完了として役割を分離する。
+        _track_floor_event("floor_clear")
         _track_floor_event("game_clear")
         message = "四本の脚をすべて破壊しました。"
         return
@@ -2600,6 +2603,8 @@ func _finish_player_turn() -> void:
             auto_pass_pending = false
             auto_pass_timer = 0.0
             _play_sfx(SFX_GAME_CLEAR)
+            # 最終FLOORでもfloor_clearを送ってからgame_clearを送る。
+            _track_floor_event("floor_clear")
             _track_floor_event("game_clear")
             message = "全10ステージをクリアしました。"
         else:
