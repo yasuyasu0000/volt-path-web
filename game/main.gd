@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.968
+# VOLT PATH ver0.969
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -1535,7 +1535,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.968", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.969", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -2136,8 +2136,40 @@ func _confirm_dash() -> void:
 func _begin_loop() -> void:
     aim_mode = CARD_LOOP
     loop_candidates = _loop_candidates()
-    loop_candidate_index = 0
+    loop_candidate_index = _preferred_loop_candidate_index(loop_candidates)
     message = ""
+
+func _loop_candidate_has_enemy(candidate: Dictionary) -> bool:
+    if candidate.is_empty():
+        return false
+
+    # サーキットブレイクは内側だけでなく境界PATHも攻撃範囲。
+    # 初期選択も実際の攻撃判定と同じ範囲を使う。
+    var attack_region: Dictionary = {}
+    var inside: Array = candidate["inside"]
+    var boundary: Array = candidate["boundary"]
+    for item in inside:
+        attack_region[Vector2i(item)] = true
+    for item in boundary:
+        attack_region[Vector2i(item)] = true
+
+    for enemy in enemies:
+        if int(enemy.get("hp", 0)) <= 0:
+            continue
+        # 大型敵は占有セルのどれか1マスでも範囲内なら対象ありとみなす。
+        if _enemy_intersects_region(enemy, attack_region):
+            return true
+    return false
+
+func _preferred_loop_candidate_index(candidates: Array[Dictionary]) -> int:
+    if candidates.is_empty():
+        return 0
+    # 候補順は並べ替えず、従来順の中で最初に敵を含むサーキットへ
+    # 初期カーソルだけ合わせる。敵がいなければ従来どおり候補0。
+    for i in range(candidates.size()):
+        if _loop_candidate_has_enemy(candidates[i]):
+            return i
+    return 0
 
 func _cycle_loop_candidate(d: Vector2i) -> void:
     if loop_candidates.size() <= 1:
@@ -2151,7 +2183,7 @@ func _cycle_loop_candidate(d: Vector2i) -> void:
 func _selected_loop_candidate() -> Dictionary:
     if loop_candidates.is_empty():
         loop_candidates = _loop_candidates()
-        loop_candidate_index = 0
+        loop_candidate_index = _preferred_loop_candidate_index(loop_candidates)
     if loop_candidates.is_empty():
         return {}
     loop_candidate_index = clampi(loop_candidate_index, 0, loop_candidates.size() - 1)
