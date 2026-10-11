@@ -357,7 +357,7 @@ func _draw_card_panel(slot: int, rect: Rect2) -> void:
     h.draw_rect(rect, fill)
     h.draw_rect(rect, border, false, border_width)
 
-    # 左上は入力キー、中央上はカード名。選択中は右上へ状態だけを置く。
+    # 左上は入力キー、中央上は2行カード名。選択中表示はBAT行右側へ置く。
     var key_rect := Rect2(rect.position + Vector2(10, 9), Vector2(30, 30))
     # 入力キー表示は「暗い背景＋明るい文字」に固定して、カード背景の明暗に左右されないようにする。
     var key_fill: Color = Color("#08131d")
@@ -367,9 +367,15 @@ func _draw_card_panel(slot: int, rect: Rect2) -> void:
     h.draw_rect(key_rect, key_edge, false, 2.0 if active else 1.0)
     h.draw_string(font, key_rect.position + Vector2(9, 22), str(slot + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, key_text)
 
-    h.draw_string(font, rect.position + Vector2(50, 29), h._card_name(card_id), HORIZONTAL_ALIGNMENT_LEFT, 100, 18, main_text)
+    # 正式名称は省略せず、全カードを意味の切れ目で2行表示する。
+    # 1行ごとの幅をカード右端近くまで使い、長い「ライトニング」も縮小せず読めるようにする。
+    var name_lines: PackedStringArray = CardCatalog.hud_name_lines(card_id)
+    h.draw_string(font, rect.position + Vector2(50, 20), name_lines[0], HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 58.0, 18, main_text)
+    h.draw_string(font, rect.position + Vector2(50, 39), name_lines[1], HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 58.0, 18, main_text)
+
+    # 選択中表示は2行名と競合しないようBAT行の右側へ移す。
     if active:
-        h.draw_string(font, rect.position + Vector2(148, 29), "選択中", HORIZONTAL_ALIGNMENT_LEFT, 50, 16, Color.WHITE)
+        h.draw_string(font, rect.position + Vector2(135, 59), "選択中", HORIZONTAL_ALIGNMENT_LEFT, 59, 15, Color.WHITE)
 
     # コストは「BAT」という共通語と青い四角だけにして、読み方を全カードで揃える。
     h.draw_string(font, rect.position + Vector2(12, 59), "BAT", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, dim_text)

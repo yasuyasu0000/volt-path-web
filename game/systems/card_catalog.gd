@@ -37,6 +37,24 @@ static func display_name(card_id: String) -> String:
             return "サーキットブレイク"
     return "不明"
 
+# 左HUDでは正式名称を省略せず、意味の切れ目で2行に分けて表示する。
+# メッセージ等では display_name() の1行正式名称をそのまま使う。
+static func hud_name_lines(card_id: String) -> PackedStringArray:
+    match card_id:
+        ARC:
+            return PackedStringArray(["ストレート", "ボルト"])
+        SURGE:
+            return PackedStringArray(["フロア", "ライトニング"])
+        BOMB:
+            return PackedStringArray(["サンダー", "ボム"])
+        WARP:
+            return PackedStringArray(["ボルト", "ワープ"])
+        DASH:
+            return PackedStringArray(["チェイン", "ダッシュ"])
+        LOOP:
+            return PackedStringArray(["サーキット", "ブレイク"])
+    return PackedStringArray(["不明", ""])
+
 static func cost(card_id: String) -> int:
     match card_id:
         ARC:

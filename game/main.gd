@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.960
+# VOLT PATH ver0.962
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
