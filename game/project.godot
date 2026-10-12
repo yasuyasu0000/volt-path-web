@@ -3,7 +3,7 @@
 config_version=5
 
 [application]
-config/name="VOLT PATH ver0.970"
+config/name="VOLT PATH ver0.971"
 run/main_scene="res://main.tscn"
 run/max_fps=60
 

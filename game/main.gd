@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.970
+# VOLT PATH ver0.971
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -1579,7 +1579,7 @@ func _draw_title_screen() -> void:
     else:
         draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.970", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.971", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
 
 func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
     var font: Font = ui_font
@@ -2571,7 +2571,9 @@ func _schedule_auto_pass_if_needed() -> void:
 
 func _analytics_run_payload() -> Dictionary:
     return {
-        "floor": current_floor,
+        # GA4 custom dimensions are displayed/sorted as text in Explore.
+        # Zero-padding keeps FLOOR order stable: 01, 02, ... 10.
+        "floor": "%02d" % current_floor,
     }
 
 func _analytics_floor_metrics() -> Dictionary:

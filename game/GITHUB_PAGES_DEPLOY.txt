@@ -1,4 +1,4 @@
-VOLT PATH ver0.970 - GitHub Pages 公開手順
+VOLT PATH ver0.971 - GitHub Pages 公開手順
 ==========================================
 
 このプロジェクトは main ブランチへ push すると、GitHub Actions が Linux 上の
@@ -34,6 +34,7 @@ Measurement ID: G-EFN2NDBE53
 - game_clear
 
 game_versionは全イベントへ自動付与し、floorもゲーム側から送信します。
+floorはGA4探索の文字列ソート対策として 01〜10 の2桁文字列で送信します。
 damage_taken: source / amount / hp_after。敵由来では内部確認用enemy_typeも追加。
 sourceとgame_overのcauseは contact / ranged / charge / area / boss_stomp / overcharge の6分類です。
 floor_clear / game_over / game_clear: floor_time_seconds / floor_turns / floor_damage_taken / hits_taken / hp_remaining。
