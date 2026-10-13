@@ -1,4 +1,4 @@
-name: Deploy VOLT PATH to GitHub Pages
+name: Deploy VOLT RABBIT to GitHub Pages
 
 "on":
   push:

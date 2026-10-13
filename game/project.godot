@@ -1,9 +1,9 @@
-; VOLT PATH
+; VOLT RABBIT
 ; Godot 4.7.x
 config_version=5
 
 [application]
-config/name="VOLT PATH ver0.971"
+config/name="VOLT RABBIT"
 run/main_scene="res://main.tscn"
 run/max_fps=60
 

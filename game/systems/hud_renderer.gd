@@ -117,7 +117,7 @@ func _draw_hud() -> void:
     # 通常時は結果・エラーを表示。スキル選択中は同じメッセージ欄を
     # 2行の効果説明として使い、必要な選択状況/エラーだけ3行目へ添える。
     var aim_description: String = _aim_skill_description()
-    if aim_description != "" or h.message != "":
+    if (aim_description != "" or h.message != "") and not h.stage_clear:
         var message_box := Rect2(Vector2(323, 532), Vector2(674, 96))
         h.draw_rect(message_box, h.C_PANEL)
         h.draw_rect(message_box, h.C_FLOOR_EDGE, false, 1.0)
@@ -129,9 +129,13 @@ func _draw_hud() -> void:
             h.draw_multiline_string(font, Vector2(341, 566), h.message, HORIZONTAL_ALIGNMENT_LEFT, 638, 21, 19, h.C_TEXT)
 
     if h.stage_clear:
-        h.draw_rect(Rect2(Vector2(437, 205), Vector2(446, 142)), Color(0, 0, 0, 0.88))
-        h.draw_string(font, Vector2(492, 260), "STAGE CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_CHARGED_INNER)
-        h.draw_string(font, Vector2(524, 302), "次のステージへ", HORIZONTAL_ALIGNMENT_LEFT, -1, 19, h.C_TEXT)
+        # 固定X座標ではなく、STAGE CLEARパネル自体を基準に中央揃えする。
+        # これによりフォントサイズや文字幅が変わっても枠と文字の中心がずれない。
+        var clear_panel := Rect2(Vector2(437, 205), Vector2(446, 142))
+        h.draw_rect(clear_panel, Color(0, 0, 0, 0.88))
+        h.draw_rect(clear_panel, h.C_FLOOR_EDGE, false, 1.0)
+        h.draw_string(font, Vector2(clear_panel.position.x, 260), "STAGE CLEAR", HORIZONTAL_ALIGNMENT_CENTER, clear_panel.size.x, 34, h.C_CHARGED_INNER)
+        h.draw_string(font, Vector2(clear_panel.position.x, 302), "次のステージへ", HORIZONTAL_ALIGNMENT_CENTER, clear_panel.size.x, 19, h.C_TEXT)
 
 
     if h.run_clear:
@@ -171,12 +175,31 @@ func _draw_stage_intro() -> void:
     var alpha: float = h._stage_intro_alpha()
     if alpha <= 0.0:
         return
+
     var font: Font = h.ui_font
-    var rect := Rect2(Vector2(437, 270), Vector2(446, 140))
-    h.draw_rect(rect, Color(0.0, 0.0, 0.0, 0.92 * alpha), true)
-    h.draw_rect(rect, Color(h.C_FLOOR_EDGE, alpha), false, 1.0)
-    var text_color := Color(h.C_TEXT, alpha)
-    h.draw_string(font, rect.position + Vector2(0.0, 88.0), "STAGE %d" % h.current_floor, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 38, text_color)
+    # 盤面を隠さず、中央の細い半透明帯だけで階層の区切りを示す。
+    var band := Rect2(Vector2(366.0, 270.0), Vector2(548.0, 104.0 if h.current_floor == h.TOTAL_FLOORS else 86.0))
+    h.draw_rect(band, Color(0.0, 0.0, 0.0, 0.66 * alpha), true)
+
+    var line_color := Color(h.C_TELEGRAPH_EDGE, 0.78 * alpha)
+    h.draw_line(Vector2(band.position.x + 20.0, band.position.y), Vector2(band.end.x - 20.0, band.position.y), line_color, 1.0, true)
+    h.draw_line(Vector2(band.position.x + 20.0, band.end.y), Vector2(band.end.x - 20.0, band.end.y), line_color, 1.0, true)
+
+    var label := "STAGE"
+    var number := "%02d" % h.current_floor
+    var font_size := 36
+    var label_size: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+    var number_size: Vector2 = font.get_string_size(number, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+    var gap := 18.0
+    var total_width: float = label_size.x + gap + number_size.x
+    var text_x: float = band.get_center().x - total_width * 0.5
+    var baseline_y: float = band.position.y + 57.0
+
+    h.draw_string(font, Vector2(text_x, baseline_y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(h.C_TEXT, alpha))
+    h.draw_string(font, Vector2(text_x + label_size.x + gap, baseline_y), number, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(h.C_CHARGED_INNER, alpha))
+
+    if h.current_floor == h.TOTAL_FLOORS:
+        h.draw_string(font, Vector2(band.position.x, band.position.y + 86.0), "FINAL", HORIZONTAL_ALIGNMENT_CENTER, band.size.x, 16, Color(h.C_TELEGRAPH_EDGE, 0.92 * alpha))
 
 func _draw_basic_control_guide() -> void:
     var font: Font = h.ui_font

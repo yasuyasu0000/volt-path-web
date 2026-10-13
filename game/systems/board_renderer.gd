@@ -384,6 +384,26 @@ func draw_enemies() -> void:
     # 敵ごとの局所揺れで変更した描画原点を、画面全体の基準へ戻す。
     h.draw_set_transform(base_offset)
 
+func draw_enemy_charged_floor_hints() -> void:
+    # スキル選択中だけ、敵の下に隠れた帯電床を敵より前面へ枠表示する。
+    # 塗りは重ねず、実際に帯電している占有セルだけを1マスずつ示す。
+    if h.aim_mode == "":
+        return
+
+    var t: float = float(Time.get_ticks_msec()) / 1000.0
+    var pulse01: float = (sin(t * TAU / h.ENEMY_CHARGED_HINT_PULSE_INTERVAL) + 1.0) * 0.5
+    var hint_color: Color = h.C_CHARGED_INNER.darkened(0.30).lerp(h.C_CHARGED_INNER.lightened(0.30), pulse01)
+    hint_color.a = lerpf(0.48, 0.98, pulse01)
+
+    for enemy in h.enemies:
+        if int(enemy.get("hp", 0)) <= 0 or bool(enemy.get("destroyed", false)):
+            continue
+        for cell in h._enemy_cells(enemy):
+            if not h.charged.has(cell):
+                continue
+            # セル境界より少し内側へ置き、隣接セルの枠同士が潰れないようにする。
+            h.draw_rect(h._cell_rect(cell).grow(-2.0), hint_color, false, 3.0, true)
+
 func draw_enemy_hit_flashes() -> void:
     # 実際に攻撃が触れた占有マスだけを白くし、そのセル自体を短く小刻みに震わせる。
     # 大型敵の「どこへ当たったか」を一目で読めるよう、敵全体の白化は行わない。

@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT PATH ver0.971
+# VOLT RABBIT ver0.980
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -31,8 +31,13 @@ const MAX_HP := 6
 const REROLL_COST := GameBalance.REROLL_COST
 const TOTAL_FLOORS := 10
 const AUTO_PASS_DELAY := 1.0
-const STAGE_INTRO_DURATION := 3.0
-const STAGE_INTRO_FADE_DURATION := 0.16
+const STAGE_INTRO_DURATION := 1.0
+const STAGE_INTRO_FADE_DURATION := 0.15
+const TITLE_FADE_IN_DURATION := 0.28
+const TITLE_START_CONFIRM_DURATION := 0.08
+const TITLE_FADE_OUT_DURATION := 0.20
+const TITLE_RABBIT_PATH := "res://assets/title_rabbit.png"
+const TITLE_START_RECT := Rect2(748.0, 488.0, 350.0, 72.0)
 const FULL_CHARGE_MOVE_DAMAGE := GameBalance.FULL_CHARGE_MOVE_DAMAGE
 const FULL_CHARGE_ENEMY_DAMAGE := GameBalance.FULL_CHARGE_ENEMY_DAMAGE
 const FULL_CHARGE_FLASH_INTERVAL := 0.16
@@ -86,6 +91,12 @@ const CARD_DASH := CardCatalog.DASH
 const CARD_LOOP := CardCatalog.LOOP
 
 const C_BG := Color("#091018")
+const C_TITLE_BG := Color("#0b0d10")
+const C_TITLE_INK := Color("#d9dfe0")
+const C_TITLE_MUTED := Color("#92999b")
+const C_TITLE_KEY_HINT := Color("#aeb5b7")
+const C_TITLE_TEAL := Color("#39c4c9")
+const C_TITLE_ORANGE := Color("#ff8a1f")
 const C_PANEL := Color("#101a24")
 const C_PANEL_INNER := Color("#15222e")
 const C_PANEL_DISABLED := Color("#0d141c")
@@ -98,6 +109,7 @@ const C_WALL := Color("#0b0f14")
 const C_WALL_EDGE := Color("#59636d")
 const C_PLAYER := Color("#4f8cff")
 const PLAYER_PULSE_INTERVAL := 1.8
+const ENEMY_CHARGED_HINT_PULSE_INTERVAL := 2.0
 const HP_ICON_PULSE_INTERVAL := 1.8
 # Slow idle pulses/telegraph flashes do not need a full 60 redraws per second.
 # Active skill/hit FX still request up to 60 FPS for smooth short animations.
@@ -270,8 +282,10 @@ var restart_confirm_yes := false
 var stage_restart_snapshot: Dictionary = {}
 var _redraw_accumulator := 0.0
 var title_screen_active := true
-var title_menu_index := 0
-var title_exit_pending := false
+var title_enter_elapsed := 0.0
+var title_start_transition_active := false
+var title_start_transition_elapsed := 0.0
+var title_rabbit_texture: Texture2D = null
 
 func _ready() -> void:
     ui_font = UiFont.build()
@@ -293,14 +307,18 @@ func _ready() -> void:
     web_analytics = WebAnalytics.new()
     web_analytics.setup()
     title_screen_active = true
-    title_menu_index = 0
-    title_exit_pending = false
+    title_enter_elapsed = 0.0
+    title_start_transition_active = false
+    title_start_transition_elapsed = 0.0
+    if ResourceLoader.exists(TITLE_RABBIT_PATH):
+        title_rabbit_texture = ResourceLoader.load(TITLE_RABBIT_PATH) as Texture2D
     queue_redraw()
 
 func _return_to_title() -> void:
     title_screen_active = true
-    title_menu_index = 0
-    title_exit_pending = false
+    title_enter_elapsed = 0.0
+    title_start_transition_active = false
+    title_start_transition_elapsed = 0.0
     restart_confirm_active = false
     restart_confirm_yes = false
     queue_redraw()
@@ -393,8 +411,16 @@ func reset_run() -> void:
 func _process(delta: float) -> void:
     # タイトル画面ではランをまだ生成せず、タイマー・敵・演出を完全に停止する。
     if title_screen_active:
+        title_enter_elapsed += delta
+        if title_start_transition_active:
+            title_start_transition_elapsed += delta
+            if title_start_transition_elapsed >= TITLE_START_CONFIRM_DURATION + TITLE_FADE_OUT_DURATION:
+                _commit_start_run_from_title()
+                return
+            queue_redraw()
+            return
         _redraw_accumulator += delta
-        if _redraw_accumulator >= 1.0 / IDLE_REDRAW_FPS:
+        if title_enter_elapsed < TITLE_FADE_IN_DURATION or _redraw_accumulator >= 1.0 / IDLE_REDRAW_FPS:
             _redraw_accumulator = 0.0
             queue_redraw()
         return
@@ -615,7 +641,7 @@ func _finish_stage_intro() -> void:
         return
     stage_intro_active = false
     stage_intro_elapsed = 0.0
-    # ここがFLOORの実プレイ開始点。待機3秒は計測へ含めない。
+    # ここがFLOORの実プレイ開始点。短いSTAGE表示中は計測へ含めない。
     _reset_floor_analytics_baseline()
     _capture_stage_restart_snapshot()
     _track_floor_start_event()
@@ -1518,79 +1544,100 @@ func _replace_hand_slot(slot: int) -> void:
     if card_id != "":
         hand[slot] = card_id
 
-func _title_exit_available() -> bool:
-    # ブラウザではページ/タブをゲーム側から閉じられないためEXITを出さない。
-    return not OS.has_feature("web")
-
 func _handle_title_input(keycode: Key) -> void:
-    if title_exit_pending:
+    if title_start_transition_active:
         return
     match keycode:
-        KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT:
-            # Web版はSTARTのみ。存在しないEXITへカーソルを動かさない。
-            if not _title_exit_available():
-                title_menu_index = 0
-                return
-            title_menu_index = 1 - title_menu_index
-            _play_sfx(SFX_UI_MENU_MOVE)
-            queue_redraw()
         KEY_Z, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-            _play_sfx(SFX_UI_MENU_DECIDE)
-            if title_menu_index == 0 or not _title_exit_available():
-                _start_run_from_title()
-            else:
-                _quit_from_title_after_sfx()
+            _begin_title_start_transition()
         _:
             return
 
-func _quit_from_title_after_sfx() -> void:
-    # EXITでも決定音が途中で切れないよう、短いSE分だけ終了を待つ。
-    title_exit_pending = true
-    await get_tree().create_timer(0.14).timeout
-    get_tree().quit()
+func _handle_title_pointer(position: Vector2) -> void:
+    if title_start_transition_active:
+        return
+    if TITLE_START_RECT.has_point(position):
+        _begin_title_start_transition()
 
-func _start_run_from_title() -> void:
+func _begin_title_start_transition() -> void:
+    if title_start_transition_active:
+        return
+    title_start_transition_active = true
+    title_start_transition_elapsed = 0.0
+    _play_sfx(SFX_UI_MENU_DECIDE)
+    queue_redraw()
+
+func _commit_start_run_from_title() -> void:
     reset_run()
     if web_analytics != null:
         web_analytics.track("game_start", _analytics_run_payload())
     title_screen_active = false
-    title_menu_index = 0
+    title_start_transition_active = false
+    title_start_transition_elapsed = 0.0
     _begin_stage_intro()
+
+func _title_screen_alpha() -> float:
+    var alpha := 1.0
+    if TITLE_FADE_IN_DURATION > 0.0:
+        alpha = minf(alpha, title_enter_elapsed / TITLE_FADE_IN_DURATION)
+    if title_start_transition_active and TITLE_FADE_OUT_DURATION > 0.0:
+        var fade_elapsed := title_start_transition_elapsed - TITLE_START_CONFIRM_DURATION
+        if fade_elapsed > 0.0:
+            alpha = minf(alpha, 1.0 - fade_elapsed / TITLE_FADE_OUT_DURATION)
+    return clampf(alpha, 0.0, 1.0)
+
+func _draw_title_rabbit(alpha: float) -> void:
+    if title_rabbit_texture == null:
+        return
+    var available := Rect2(18.0, 10.0, 670.0, 700.0)
+    var texture_size := title_rabbit_texture.get_size()
+    if texture_size.x <= 0.0 or texture_size.y <= 0.0:
+        return
+    var scale_factor := minf(available.size.x / texture_size.x, available.size.y / texture_size.y)
+    var draw_size := texture_size * scale_factor
+    var draw_pos := Vector2(
+        available.position.x + (available.size.x - draw_size.x) * 0.50,
+        available.end.y - draw_size.y
+    )
+    draw_texture_rect(title_rabbit_texture, Rect2(draw_pos, draw_size), false, Color(1.0, 1.0, 1.0, alpha))
 
 func _draw_title_screen() -> void:
     var font: Font = ui_font
-    var center_x := WINDOW_SIZE.x * 0.5
+    var alpha := _title_screen_alpha()
 
-    # 本編と同じ電気色を使った、情報量を抑えたタイトル画面。
-    for x in range(0, int(WINDOW_SIZE.x) + CELL, CELL):
-        draw_line(Vector2(x, 0), Vector2(x, WINDOW_SIZE.y), Color(0.10, 0.17, 0.23, 0.20), 1.0)
-    for y in range(0, int(WINDOW_SIZE.y) + CELL, CELL):
-        draw_line(Vector2(0, y), Vector2(WINDOW_SIZE.x, y), Color(0.10, 0.17, 0.23, 0.20), 1.0)
+    # ほぼ黒の背景に、透過した電気ウサギを左側へ大きく置く。
+    draw_rect(Rect2(Vector2.ZERO, WINDOW_SIZE), Color(C_TITLE_BG, alpha), true)
+    _draw_title_rabbit(alpha)
 
-    var pulse := (sin(float(Time.get_ticks_msec()) * 0.0026) + 1.0) * 0.5
-    var title_color := C_CHARGED_INNER.darkened(0.08).lerp(Color.WHITE, pulse * 0.20)
-    draw_string(font, Vector2(center_x - 260.0, 205.0), "VOLT PATH", HORIZONTAL_ALIGNMENT_CENTER, 520.0, 58, title_color)
-    draw_string(font, Vector2(center_x - 220.0, 244.0), "CHARGE  /  CONNECT  /  SURVIVE", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 15, C_DIM)
+    # 右側はロゴ、副題、STARTだけ。タイトル画面では説明を増やさない。
+    draw_string(font, Vector2(742.0, 172.0), "VOLT", HORIZONTAL_ALIGNMENT_LEFT, 430.0, 64, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(738.0, 262.0), "RABBIT", HORIZONTAL_ALIGNMENT_LEFT, 490.0, 90, Color(C_TITLE_TEAL, alpha))
+    draw_string(font, Vector2(748.0, 354.0), "電気ウサギは", HORIZONTAL_ALIGNMENT_LEFT, 430.0, 28, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(748.0, 392.0), "ダンジョンを破壊する", HORIZONTAL_ALIGNMENT_LEFT, 470.0, 28, Color(C_TITLE_INK, alpha))
 
-    _draw_title_menu_item(Rect2(center_x - 150.0, 330.0, 300.0, 58.0), "START", true if not _title_exit_available() else title_menu_index == 0)
-    if _title_exit_available():
-        _draw_title_menu_item(Rect2(center_x - 150.0, 404.0, 300.0, 58.0), "EXIT", title_menu_index == 1)
-        draw_string(font, Vector2(center_x - 220.0, 530.0), "↑↓  SELECT    Z / ENTER  DECIDE", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
-    else:
-        draw_string(font, Vector2(center_x - 220.0, 475.0), "Z / ENTER  START", HORIZONTAL_ALIGNMENT_CENTER, 440.0, 16, C_DIM)
+    # STARTは押せる領域だと一目で分かるよう、オレンジ枠だけをゆっくり明暗させる。
+    var pulse01 := (sin(float(Time.get_ticks_msec()) * TAU / 1800.0) + 1.0) * 0.5
+    var frame_strength := lerpf(0.35, 1.0, pulse01)
+    if title_start_transition_active:
+        frame_strength = 1.0
 
-    draw_string(font, Vector2(center_x - 100.0, 675.0), "ver 0.971", HORIZONTAL_ALIGNMENT_CENTER, 200.0, 14, C_DIM.darkened(0.12))
+    var frame_color := Color(C_TITLE_ORANGE, alpha * frame_strength)
+    var glow_color := Color(C_TITLE_ORANGE, alpha * frame_strength * 0.20)
+    draw_rect(TITLE_START_RECT.grow(3.0), glow_color, false, 7.0, true)
+    draw_rect(TITLE_START_RECT, frame_color, false, 3.0, true)
 
-func _draw_title_menu_item(rect: Rect2, label: String, selected: bool) -> void:
-    var font: Font = ui_font
-    var fill := C_PANEL_ACTIVE if selected else C_PANEL
-    var edge := C_CHARGED_INNER if selected else C_FLOOR_EDGE
-    draw_rect(rect, fill, true)
-    draw_rect(rect, edge, false, 2.0 if selected else 1.0)
-    if selected:
-        var marker := Rect2(rect.position + Vector2(12.0, 13.0), Vector2(5.0, rect.size.y - 26.0))
-        draw_rect(marker, C_CHARGED_INNER, true)
-    draw_string(font, rect.position + Vector2(0.0, 38.0), label, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 22, C_TEXT if selected else C_DIM)
+    # 決定直後だけ短く強く反応させてから、画面全体を暗転させる。
+    if title_start_transition_active and title_start_transition_elapsed <= TITLE_START_CONFIRM_DURATION:
+        var confirm_t := 1.0 - clampf(title_start_transition_elapsed / TITLE_START_CONFIRM_DURATION, 0.0, 1.0)
+        draw_rect(TITLE_START_RECT, Color(C_TITLE_ORANGE, alpha * (0.08 + 0.12 * confirm_t)), true)
+        draw_rect(TITLE_START_RECT.grow(5.0), Color(C_TITLE_ORANGE, alpha * 0.34 * confirm_t), false, 9.0, true)
+
+    draw_string(font, Vector2(778.0, 536.0), "START", HORIZONTAL_ALIGNMENT_LEFT, 145.0, 32, Color(C_TITLE_INK, alpha))
+    # 操作案内はSTARTより一段弱くしつつ、Zだけは同じ明るさで拾いやすくする。
+    draw_string(font, Vector2(938.0, 534.0), "[ ", HORIZONTAL_ALIGNMENT_LEFT, 30.0, 20, Color(C_TITLE_KEY_HINT, alpha))
+    draw_string(font, Vector2(950.0, 534.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, 20.0, 20, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(964.0, 534.0), "キー ]", HORIZONTAL_ALIGNMENT_LEFT, 105.0, 20, Color(C_TITLE_KEY_HINT, alpha))
+
 
 func _card_name(card_id: String) -> String:
     return CardCatalog.display_name(card_id)
@@ -1602,13 +1649,21 @@ func _card_short_info(card_id: String) -> String:
     return CardCatalog.short_info(card_id)
 
 func _unhandled_input(event: InputEvent) -> void:
+    if title_screen_active:
+        if event is InputEventKey:
+            if event.pressed and not event.echo:
+                _handle_title_input(event.keycode)
+        elif event is InputEventMouseButton:
+            if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+                _handle_title_pointer(event.position)
+        elif event is InputEventScreenTouch:
+            if event.pressed:
+                _handle_title_pointer(event.position)
+        return
+
     if not (event is InputEventKey):
         return
     if not event.pressed or event.echo:
-        return
-
-    if title_screen_active:
-        _handle_title_input(event.keycode)
         return
 
     if stage_intro_active:
@@ -3346,6 +3401,7 @@ func _draw() -> void:
 
     board_renderer.draw_aim_overlay()
     board_renderer.draw_enemies()
+    board_renderer.draw_enemy_charged_floor_hints()
     board_renderer.draw_enemy_hit_flashes()
     board_renderer.draw_player()
     board_renderer.draw_enemy_hp_labels()
