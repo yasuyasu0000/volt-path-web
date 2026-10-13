@@ -1,4 +1,4 @@
-VOLT RABBIT ver0.980
+VOLT RABBIT ver0.983
 =================
 対象: Godot 4.7.x / Compatibility
 

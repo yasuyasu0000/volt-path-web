@@ -117,7 +117,7 @@ func _draw_hud() -> void:
     # 通常時は結果・エラーを表示。スキル選択中は同じメッセージ欄を
     # 2行の効果説明として使い、必要な選択状況/エラーだけ3行目へ添える。
     var aim_description: String = _aim_skill_description()
-    if (aim_description != "" or h.message != "") and not h.stage_clear:
+    if (aim_description != "" or h.message != "") and not h.stage_clear and not h.run_clear:
         var message_box := Rect2(Vector2(323, 532), Vector2(674, 96))
         h.draw_rect(message_box, h.C_PANEL)
         h.draw_rect(message_box, h.C_FLOOR_EDGE, false, 1.0)
@@ -137,23 +137,6 @@ func _draw_hud() -> void:
         h.draw_string(font, Vector2(clear_panel.position.x, 260), "STAGE CLEAR", HORIZONTAL_ALIGNMENT_CENTER, clear_panel.size.x, 34, h.C_CHARGED_INNER)
         h.draw_string(font, Vector2(clear_panel.position.x, 302), "次のステージへ", HORIZONTAL_ALIGNMENT_CENTER, clear_panel.size.x, 19, h.C_TEXT)
 
-
-    if h.run_clear:
-        h.draw_rect(Rect2(Vector2(437, 128), Vector2(446, 345)), Color(0, 0, 0, 0.92))
-        h.draw_string(font, Vector2(505, 179), "GAME CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, h.C_CHARGED_INNER)
-        h.draw_string(font, Vector2(506, 211), "全10ステージ踏破", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_TEXT)
-
-        h.draw_string(font, Vector2(493, 262), "クリア時間", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 262), h._format_clear_time(h.run_elapsed_seconds), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-        h.draw_string(font, Vector2(493, 302), "ターン数", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 302), str(h.turn), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-        h.draw_string(font, Vector2(493, 342), "歩数", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 342), str(h.step_count), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-        h.draw_string(font, Vector2(493, 382), "被ダメージ", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, h.C_DIM)
-        h.draw_string(font, Vector2(701, 382), str(h.damage_taken), HORIZONTAL_ALIGNMENT_RIGHT, 118, 22, h.C_TEXT)
-
-        h.draw_line(Vector2(493, 414), Vector2(827, 414), h.C_FLOOR_EDGE, 1.0)
-        h.draw_string(font, Vector2(590, 452), "Zでタイトルへ", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, h.C_TEXT)
 
     if h.game_over:
         h.draw_rect(Rect2(Vector2(437, 142), Vector2(446, 356)), Color(0, 0, 0, 0.92))

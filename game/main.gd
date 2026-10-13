@@ -13,7 +13,7 @@ const EnemyGeometry = preload("res://systems/enemy_geometry.gd")
 const WebAnalytics = preload("res://systems/web_analytics.gd")
 const UiFont = preload("res://systems/ui_font.gd")
 
-# VOLT RABBIT ver0.980
+# VOLT RABBIT ver0.983
 # HUD prototype:
 # - 左: 手札3枚 + 0キーリロール
 # - 中: ステージ
@@ -31,13 +31,19 @@ const MAX_HP := 6
 const REROLL_COST := GameBalance.REROLL_COST
 const TOTAL_FLOORS := 10
 const AUTO_PASS_DELAY := 1.0
-const STAGE_INTRO_DURATION := 1.0
-const STAGE_INTRO_FADE_DURATION := 0.15
+const STAGE_INTRO_DURATION := 1.8
+const STAGE_INTRO_FADE_DURATION := 0.20
 const TITLE_FADE_IN_DURATION := 0.28
 const TITLE_START_CONFIRM_DURATION := 0.08
 const TITLE_FADE_OUT_DURATION := 0.20
 const TITLE_RABBIT_PATH := "res://assets/title_rabbit.png"
 const TITLE_START_RECT := Rect2(748.0, 488.0, 350.0, 72.0)
+const GAME_CLEAR_CELEBRATION_DURATION := 4.0
+const GAME_CLEAR_MIN_SKIP_TIME := 1.0
+const GAME_CLEAR_FADE_IN_DURATION := 0.20
+const GAME_CLEAR_FADE_OUT_DURATION := 0.40
+const GAME_CLEAR_RESULT_FADE_IN_DURATION := 0.25
+const GAME_CLEAR_TITLE_RECT := Rect2(430.0, 548.0, 420.0, 72.0)
 const FULL_CHARGE_MOVE_DAMAGE := GameBalance.FULL_CHARGE_MOVE_DAMAGE
 const FULL_CHARGE_ENEMY_DAMAGE := GameBalance.FULL_CHARGE_ENEMY_DAMAGE
 const FULL_CHARGE_FLASH_INTERVAL := 0.16
@@ -211,6 +217,9 @@ var stage_clear_timer := 0.0
 var stage_intro_active := false
 var stage_intro_elapsed := 0.0
 var run_clear := false
+var game_clear_celebration_active := false
+var game_clear_celebration_elapsed := 0.0
+var game_clear_result_elapsed := 0.0
 var run_elapsed_seconds: float = 0.0
 var step_count := 0
 var damage_taken := 0
@@ -345,6 +354,9 @@ func reset_run() -> void:
     stage_intro_active = false
     stage_intro_elapsed = 0.0
     run_clear = false
+    game_clear_celebration_active = false
+    game_clear_celebration_elapsed = 0.0
+    game_clear_result_elapsed = 0.0
     run_elapsed_seconds = 0.0
     step_count = 0
     damage_taken = 0
@@ -440,6 +452,28 @@ func _process(delta: float) -> void:
         var remaining: float = STAGE_INTRO_DURATION - stage_intro_elapsed
         if stage_intro_elapsed <= STAGE_INTRO_FADE_DURATION or remaining <= STAGE_INTRO_FADE_DURATION:
             queue_redraw()
+        return
+
+    # 最終勝利は盤面を静止させたまま最大4秒見せる。
+    # 最初の1秒は必ず見せ、以降はZで暗転区間へ短縮できる。
+    if run_clear and game_clear_celebration_active:
+        game_clear_celebration_elapsed = minf(GAME_CLEAR_CELEBRATION_DURATION, game_clear_celebration_elapsed + delta)
+        if game_clear_celebration_elapsed >= GAME_CLEAR_CELEBRATION_DURATION:
+            game_clear_celebration_active = false
+            game_clear_result_elapsed = 0.0
+            _redraw_accumulator = 0.0
+            queue_redraw()
+            return
+        _redraw_accumulator += delta
+        if _redraw_accumulator >= 1.0 / IDLE_REDRAW_FPS:
+            _redraw_accumulator = fmod(_redraw_accumulator, 1.0 / IDLE_REDRAW_FPS)
+            queue_redraw()
+        return
+
+    # 専用リザルトではゲーム進行を止め、フェードとTITLE枠の呼吸だけ20FPSで更新する。
+    if run_clear:
+        game_clear_result_elapsed += delta
+        _schedule_visual_redraw(delta, 1)
         return
 
     # 0 = no continuous visual update, 1 = slow idle animation, 2 = short active FX.
@@ -766,6 +800,9 @@ func _restart_current_stage_from_snapshot(reason: String = "reset") -> void:
     stage_clear = false
     stage_clear_timer = 0.0
     run_clear = false
+    game_clear_celebration_active = false
+    game_clear_celebration_elapsed = 0.0
+    game_clear_result_elapsed = 0.0
     restart_confirm_active = false
     restart_confirm_yes = false
 
@@ -1613,7 +1650,7 @@ func _draw_title_screen() -> void:
     draw_string(font, Vector2(742.0, 172.0), "VOLT", HORIZONTAL_ALIGNMENT_LEFT, 430.0, 64, Color(C_TITLE_INK, alpha))
     draw_string(font, Vector2(738.0, 262.0), "RABBIT", HORIZONTAL_ALIGNMENT_LEFT, 490.0, 90, Color(C_TITLE_TEAL, alpha))
     draw_string(font, Vector2(748.0, 354.0), "電気ウサギは", HORIZONTAL_ALIGNMENT_LEFT, 430.0, 28, Color(C_TITLE_INK, alpha))
-    draw_string(font, Vector2(748.0, 392.0), "ダンジョンを破壊する", HORIZONTAL_ALIGNMENT_LEFT, 470.0, 28, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(748.0, 392.0), "ダンジョンを制圧する", HORIZONTAL_ALIGNMENT_LEFT, 470.0, 28, Color(C_TITLE_INK, alpha))
 
     # STARTは押せる領域だと一目で分かるよう、オレンジ枠だけをゆっくり明暗させる。
     var pulse01 := (sin(float(Time.get_ticks_msec()) * TAU / 1800.0) + 1.0) * 0.5
@@ -1637,6 +1674,78 @@ func _draw_title_screen() -> void:
     draw_string(font, Vector2(938.0, 534.0), "[ ", HORIZONTAL_ALIGNMENT_LEFT, 30.0, 20, Color(C_TITLE_KEY_HINT, alpha))
     draw_string(font, Vector2(950.0, 534.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, 20.0, 20, Color(C_TITLE_INK, alpha))
     draw_string(font, Vector2(964.0, 534.0), "キー ]", HORIZONTAL_ALIGNMENT_LEFT, 105.0, 20, Color(C_TITLE_KEY_HINT, alpha))
+
+func _game_clear_celebration_text_alpha() -> float:
+    if not game_clear_celebration_active:
+        return 0.0
+    if GAME_CLEAR_FADE_IN_DURATION <= 0.0:
+        return 1.0
+    return clampf(game_clear_celebration_elapsed / GAME_CLEAR_FADE_IN_DURATION, 0.0, 1.0)
+
+func _draw_game_clear_celebration() -> void:
+    if not run_clear or not game_clear_celebration_active:
+        return
+    var font: Font = ui_font
+    var alpha := _game_clear_celebration_text_alpha()
+    var band := Rect2(Vector2(304.0, 244.0), Vector2(672.0, 168.0))
+    draw_rect(band, Color(0.0, 0.0, 0.0, 0.76 * alpha), true)
+    draw_line(Vector2(band.position.x + 28.0, band.position.y), Vector2(band.end.x - 28.0, band.position.y), Color(C_TITLE_ORANGE, 0.86 * alpha), 2.0, true)
+    draw_line(Vector2(band.position.x + 28.0, band.end.y), Vector2(band.end.x - 28.0, band.end.y), Color(C_TITLE_ORANGE, 0.86 * alpha), 2.0, true)
+
+    # 最初の0.5秒だけ左右へ電気が走り、以降は静かな勝利表示へ落ち着く。
+    var spark_strength := clampf(1.0 - game_clear_celebration_elapsed / 0.50, 0.0, 1.0) * alpha
+    if spark_strength > 0.0:
+        var electric := Color(C_TITLE_ORANGE, 0.95 * spark_strength)
+        var cyan_glow := Color(C_CHARGED_INNER, 0.18 * spark_strength)
+        draw_rect(Rect2(Vector2(445.0, 288.0), Vector2(390.0, 74.0)).grow(8.0), cyan_glow, false, 8.0, true)
+        var left_bolt := PackedVector2Array([Vector2(326, 329), Vector2(358, 315), Vector2(381, 333), Vector2(414, 311), Vector2(443, 325)])
+        var right_bolt := PackedVector2Array([Vector2(837, 325), Vector2(866, 310), Vector2(899, 333), Vector2(922, 315), Vector2(954, 329)])
+        draw_polyline(left_bolt, electric, 4.0, true)
+        draw_polyline(right_bolt, electric, 4.0, true)
+
+    draw_string(font, Vector2(band.position.x, 347.0), "GAME CLEAR", HORIZONTAL_ALIGNMENT_CENTER, band.size.x, 56, Color(C_CHARGED_INNER, alpha))
+    if game_clear_celebration_elapsed >= GAME_CLEAR_MIN_SKIP_TIME:
+        draw_string(font, Vector2(band.position.x, 388.0), "Z  SKIP", HORIZONTAL_ALIGNMENT_CENTER, band.size.x, 16, Color(C_TITLE_MUTED, alpha))
+
+    # 最後の0.4秒は盤面ごと黒へ落として、専用リザルトへつなぐ。
+    var fade_start := GAME_CLEAR_CELEBRATION_DURATION - GAME_CLEAR_FADE_OUT_DURATION
+    if game_clear_celebration_elapsed > fade_start and GAME_CLEAR_FADE_OUT_DURATION > 0.0:
+        var fade_t := clampf((game_clear_celebration_elapsed - fade_start) / GAME_CLEAR_FADE_OUT_DURATION, 0.0, 1.0)
+        draw_rect(Rect2(Vector2.ZERO, WINDOW_SIZE), Color(C_TITLE_BG, fade_t), true)
+
+func _game_clear_result_alpha() -> float:
+    if GAME_CLEAR_RESULT_FADE_IN_DURATION <= 0.0:
+        return 1.0
+    return clampf(game_clear_result_elapsed / GAME_CLEAR_RESULT_FADE_IN_DURATION, 0.0, 1.0)
+
+func _draw_game_clear_result_screen() -> void:
+    var font: Font = ui_font
+    var alpha := _game_clear_result_alpha()
+    draw_rect(Rect2(Vector2.ZERO, WINDOW_SIZE), C_TITLE_BG, true)
+
+    draw_string(font, Vector2(0.0, 116.0), "GAME CLEAR", HORIZONTAL_ALIGNMENT_CENTER, WINDOW_SIZE.x, 56, Color(C_CHARGED_INNER, alpha))
+    draw_string(font, Vector2(0.0, 178.0), "電気ウサギは", HORIZONTAL_ALIGNMENT_CENTER, WINDOW_SIZE.x, 26, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(0.0, 214.0), "ダンジョンを制圧した", HORIZONTAL_ALIGNMENT_CENTER, WINDOW_SIZE.x, 26, Color(C_TITLE_INK, alpha))
+    draw_line(Vector2(420.0, 244.0), Vector2(860.0, 244.0), Color(C_TITLE_ORANGE, 0.68 * alpha), 2.0, true)
+
+    var label_x := 438.0
+    var value_x := 680.0
+    var value_w := 160.0
+    var rows := [302.0, 348.0, 394.0, 440.0]
+    var labels := ["クリア時間", "ターン数", "歩数", "被ダメージ"]
+    var values := [_format_clear_time(run_elapsed_seconds), str(turn), str(step_count), str(damage_taken)]
+    for i in range(labels.size()):
+        draw_string(font, Vector2(label_x, rows[i]), labels[i], HORIZONTAL_ALIGNMENT_LEFT, 210.0, 20, Color(C_TITLE_MUTED, alpha))
+        draw_string(font, Vector2(value_x, rows[i]), values[i], HORIZONTAL_ALIGNMENT_RIGHT, value_w, 25, Color(C_CHARGED_INNER, alpha))
+
+    var pulse01 := (sin(float(Time.get_ticks_msec()) / 1000.0 * TAU / 1.8) + 1.0) * 0.5
+    var frame_strength := lerpf(0.38, 1.0, pulse01)
+    draw_rect(GAME_CLEAR_TITLE_RECT.grow(3.0), Color(C_TITLE_ORANGE, alpha * frame_strength * 0.20), false, 7.0, true)
+    draw_rect(GAME_CLEAR_TITLE_RECT, Color(C_TITLE_ORANGE, alpha * frame_strength), false, 3.0, true)
+    draw_string(font, Vector2(460.0, 596.0), "TITLE", HORIZONTAL_ALIGNMENT_LEFT, 160.0, 30, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(685.0, 594.0), "[ ", HORIZONTAL_ALIGNMENT_LEFT, 30.0, 20, Color(C_TITLE_KEY_HINT, alpha))
+    draw_string(font, Vector2(697.0, 594.0), "Z", HORIZONTAL_ALIGNMENT_LEFT, 20.0, 20, Color(C_TITLE_INK, alpha))
+    draw_string(font, Vector2(711.0, 594.0), "キー ]", HORIZONTAL_ALIGNMENT_LEFT, 105.0, 20, Color(C_TITLE_KEY_HINT, alpha))
 
 
 func _card_name(card_id: String) -> String:
@@ -1677,8 +1786,18 @@ func _unhandled_input(event: InputEvent) -> void:
 
     if run_clear:
         if event.keycode == KEY_Z:
-            _play_sfx(SFX_UI_MENU_DECIDE)
-            _return_to_title()
+            if game_clear_celebration_active:
+                if game_clear_celebration_elapsed >= GAME_CLEAR_MIN_SKIP_TIME:
+                    # Z入力後も0.4秒の暗転は残し、リザルトへの切替を唐突にしない。
+                    game_clear_celebration_elapsed = maxf(
+                        game_clear_celebration_elapsed,
+                        GAME_CLEAR_CELEBRATION_DURATION - GAME_CLEAR_FADE_OUT_DURATION
+                    )
+                    _play_sfx(SFX_UI_MENU_DECIDE)
+                    queue_redraw()
+            else:
+                _play_sfx(SFX_UI_MENU_DECIDE)
+                _return_to_title()
         return
 
     if game_over:
@@ -2723,6 +2842,9 @@ func _finish_player_turn() -> void:
         aim_mode = ""
         active_hand_slot = -1
         run_clear = true
+        game_clear_celebration_active = true
+        game_clear_celebration_elapsed = 0.0
+        game_clear_result_elapsed = 0.0
         auto_pass_pending = false
         auto_pass_timer = 0.0
         _play_sfx(SFX_GAME_CLEAR)
@@ -2730,7 +2852,7 @@ func _finish_player_turn() -> void:
         # floor_clear=各FLOOR完了、game_clear=ラン全体完了として役割を分離する。
         _track_floor_event("floor_clear")
         _track_floor_event("game_clear")
-        message = "四本の脚をすべて破壊しました。"
+        message = ""
         return
 
     if enemies.is_empty():
@@ -2738,13 +2860,16 @@ func _finish_player_turn() -> void:
         active_hand_slot = -1
         if current_floor >= TOTAL_FLOORS:
             run_clear = true
+            game_clear_celebration_active = true
+            game_clear_celebration_elapsed = 0.0
+            game_clear_result_elapsed = 0.0
             auto_pass_pending = false
             auto_pass_timer = 0.0
             _play_sfx(SFX_GAME_CLEAR)
             # 最終FLOORでもfloor_clearを送ってからgame_clearを送る。
             _track_floor_event("floor_clear")
             _track_floor_event("game_clear")
-            message = "全10ステージをクリアしました。"
+            message = ""
         else:
             stage_clear = true
             stage_clear_timer = 3.0
@@ -3388,6 +3513,9 @@ func _draw() -> void:
     if title_screen_active:
         _draw_title_screen()
         return
+    if run_clear and not game_clear_celebration_active:
+        _draw_game_clear_result_screen()
+        return
 
     draw_set_transform(_damage_feedback_shake_offset() + _boss_shake_offset() + _enemy_impact_shake_offset() + _skill_fx_shake_offset())
 
@@ -3413,5 +3541,6 @@ func _draw() -> void:
     draw_set_transform(Vector2.ZERO)
     _draw_damage_frame()
     hud_renderer.draw_stage_intro()
+    _draw_game_clear_celebration()
     hud_renderer.draw_restart_confirm()
 
